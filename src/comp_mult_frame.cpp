@@ -195,7 +195,7 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 
-	ifs_pano_cam.open(cam_data);
+	ifs_target_cam.open(cam_data);
 	if (!ifs_target_cam.is_open()) {
 		cerr << "cannnot open target_cam_data : " << argv[1] << endl;
 		return -1;
