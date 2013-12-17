@@ -33,88 +33,97 @@ int main(int argc, char** argv) {
 
 	//ここからフレーム合成プログラム
 
-	VideoCapture frame_cap;							  // target frame movie
+	VideoCapture target_cap;							  // target frame movie
 	VideoCapture pano_cap; 							  // background frame movie
 	FileStorage cvfs("log.xml", CV_STORAGE_READ);  // パノラマ背景生成時のホモグラフィ行列のログファイル
 
-	Mat panorama, target_frame, near_frame;
-	Mat homography;
+	Mat panorama, target_frame, near_frame;        // パノラマ画像，合成対象フレーム画像，近傍背景画像
+	Mat homography;									 // ホモグラフィ行列
 
-	ifstream ifs_target_cam;
-	ifstream ifs_pano_cam;
-	long s_pano; // panorama frame time
+	ifstream ifs_target_cam;							 // target_camファイルストリーム
+	ifstream ifs_pano_cam;							 // pano_cam　ファイルストリーム
+	long s_pano;
 
 	//	string str_pano, str_frame, str_video;
-	string str_pano_video, str_pano_time, str_pano_ori;
-	string str_target_video, str_target_time, str_target_ori;
-	string str_pano;
-	Mat transform_image; // 画像単体での変換結果
-	Mat transform_image2 = Mat(Size(PANO_W, PANO_H), CV_8UC3);
+	string str_pano_video, str_pano_time, str_pano_ori;			// pano_cam内のの各種ファイル名
+	string str_target_video, str_target_time, str_target_ori;	// target_cam内のの各種ファイル名
+	string str_pano;													// パノラマ背景画像のファイル名
+	stringstream ss;													// 汎用文字列ストリーム
+	Mat transform_image; 											// 画像単体でのパノラマ背景への変換結果
+	Mat transform_image2 = Mat(Size(PANO_W, PANO_H), CV_8UC3); // 合成中のパノラマ画像
 
-	vector<Mat> target_hist_channels;
-	vector<Mat> near_hist_channels;
+	vector<Mat> target_hist_channels;		// 合成対象のフレーム画像のチャネルごとのヒストグラム
+	vector<Mat> near_hist_channels;			// 合成対照フレーム近傍の背景画像のチャネルごとのヒストグラム
 
-	Mat mask = Mat(Size(PANO_W, PANO_H), CV_8U, Scalar::all(0)); // パノラマ画像のマスク
-	Mat pano_black = Mat(Size(PANO_W, PANO_H), CV_8U, Scalar::all(0)); // パノラマ画像と同じサイズの黒画像
-	Mat white_img = Mat(Size(1280, 720), CV_8U, Scalar::all(255)); // フレームと同じサイズの白画像
-	Mat gray_img1, gray_img2;
-	Mat mask2;
+	Mat mask = Mat(Size(PANO_W, PANO_H), CV_8U, Scalar::all(0)); 			// パノラマ画像のマスク
+	Mat pano_black = Mat(Size(PANO_W, PANO_H), CV_8U, Scalar::all(0)); 	// パノラマ画像と同じサイズの黒画像
+	Mat white_img = Mat(Size(1280, 720), CV_8U, Scalar::all(255));		 	// フレームと同じサイズの白画像
+	Mat gray_img1, gray_img2;													// 特徴点に利用するグレースケール画像
+	Mat mask2;																		// 膨張縮小処理後のマスク画像
 
-	vector<Point2f> pt1, pt2;
-	//	fstream fs(cam_data.txt);
-	//	fs >> str_video;
+	//　対応点座標に関する変数
+	vector<Point2f> pt1, pt2;			// 特徴点の対の画像上座標
+	std::vector<cv::DMatch> matches;	// 対応点の対の格納先
 
-	// 対応点の対の格納先
-	std::vector<cv::DMatch> matches; // matcherにより求めたおおまかな対を格納
-
-	// 特徴点の集合と特徴量
+	// 特徴点の集合と特徴量 (object画像をimage画像上に射影するイメージ)
 	std::vector<KeyPoint> objectKeypoints, imageKeypoints;
 	Mat objectDescriptors, imageDescriptors;
 
-	string algorithm_type("SURF");
-	Ptr<Feature2D> feature;
-	int hessian;
+	//　特徴点に関する変数
+	string algorithm_type("SURF");	// 特徴点抽出および特徴量記述のアルゴリズム名
+	Ptr<Feature2D> feature;			// 汎用特徴点抽出および特徴量記述クラスへのポインタ
+	int hessian;						// SURF特徴検出の際に用いるしきい値（小さいほど特徴点が検出されやすい）
 
-	int skip; // 合成開始フレーム番号
-	long end; // 合成終了フレーム番号
-	long frame_num; // 現在のフレーム位置
-	int blur; // ブレのしきい値
-	long FRAME_MAX; // 動画の最大フレーム数
-	int FRAME_T; // フレーム飛ばし間隔
+	int skip; 				// 合成開始フレーム番号
+	long end; 				// 合成終了フレーム番号
+	long frame_num; 		// 現在のフレーム位置
+	int blur; 				// ブレのしきい値
+	long FRAME_MAX; 		// 動画の最大フレーム数
+	int FRAME_T; 			// フレーム飛ばし間隔
 	float dist_direction; // センサから計算されるフレーム間の視線方向ベクトルの距離のしきい値
+	long target_frame_num;
 
 	// 各種フラグ
-	bool f_comp = false; // 線形補完
-	bool f_center = false; // センターサークル中心
-	bool f_video = false; // ビデオ書き出し
-	bool f_senser = false; // センサ情報の使用・不使用
-	bool f_line = false; // 直線検出を利用
-	bool f_undist = false; // レンズ歪み補正
+	//bool f_comp = false;  			// 線形補完
+	//bool f_center = false; 		// センターサークル中心
+	//bool f_video = false; 			// ビデオ書き出し
+	bool f_senser = false; 			// センサ情報の使用・不使用
+	bool f_line = false; 			// 直線検出を利用
+	bool f_undist = false; 			// レンズ歪み補正
+	bool f_target_video = false;	// はめ込み対象が動画ファイル（or １枚のフレーム画像）
 
-	float fps = 20; // 書き出しビデオのfps
-	string n_video; // 書き出しビデオファイル名
-	string cam_data; // 映像センサファイル名
-	string n_center; // センターサークル画像名
-	string cam_param; // 内部パラメータのxmlファイル名
-	string save_dir; // 各ファイルの保存先ディレクトリ
+
+
+	//float fps = 20; 			// 書き出しビデオのfps
+	//string n_video; 			// 書き出しビデオファイル名
+	string cam_data_path; 		// パノラマ背景cam_dataセンサファイル名
+	string target_cam_path;		// はめ込み対象cam_dataファイル名
+	//string n_center; 			// センターサークル画像名
+	string cam_param_path; 		// 内部パラメータのxmlファイル名
+	string save_path; 			// 各ファイルの保存先ディレクトリ名
+	string target_frame_path;	// 合成対象フレームのファイル名
 
 	try {
 		// コマンドラインオプションの定義
 		options_description opt("Usage");
-		opt.add_options()("cam", value<std::string> (),
-				"動画名やセンサファイル名が記述されたファイルの指定")("start,s",
-				value<int> ()->default_value(0), "スタートフレームの指定")("end,e", value<
-				int> ()->default_value(INT_MAX), "終了フレームの指定")("inter,i", value<
-				int> ()->default_value(9), "取得フレームの間隔")("blur,b",
-				value<int> ()->default_value(0), "ブラーによるフレームの破棄の閾値")("yaw",
-				value<double> ()->default_value(0), "初期フレーム投影時のyaw")("hessian",
-				value<int> ()->default_value(20), "SURFのhessianの値")("senser",
-				value<double> ()->default_value(0.0), "センサー情報を使う際の視線方向のしきい値")(
-				"line", value<bool> ()->default_value(false), "直線検出の利用")(
-				"undist", value<bool> ()->default_value(false), "画像のレンズ歪み補正")(
-				"outdir,o", value<string> ()->default_value("./"),
-				"各種ファイルの出力先ディレクトリの指定")("cam_param", value<string> (),
-				"内部パラメータ(.xml)ファイル名の指定")("help,h", "ヘルプの出力");
+		opt.add_options()
+		("panorama", value<std::string> (),"パノラマ背景画像ファイルの指定")
+		("pano_cam", value<std::string> (),"パノラマ背景のcam_dataファイルの指定")
+		("target_cam", value<std::string> (),"合成対象のcam_dataファイルの指定")
+		("target_frame", value<std::string> (),"合成対象のフレーム画像の指定")
+		("start,s",value<int> ()->default_value(0), "スタートフレームの指定")
+		("end,e", value<int> ()->default_value(INT_MAX), "終了フレームの指定")
+		("inter,i", value<int> ()->default_value(9), "取得フレームの間隔")
+		("blur,b",	value<int> ()->default_value(0), "ブラーによるフレームの破棄の閾値")
+		("yaw",value<double> ()->default_value(0), "初期フレーム投影時のyaw")
+		("hessian",value<int> ()->default_value(20), "SURFのhessianの値")
+		("senser",	value<double> ()->default_value(0.0), "センサー情報を使う際の視線方向のしきい値")
+		("line", value<bool> ()->default_value(false), "直線検出の利用")
+		("undist", value<bool> ()->default_value(false), "画像のレンズ歪み補正")
+		("outdir,o", value<string> ()->default_value("./"),"各種ファイルの出力先ディレクトリの指定")
+		("cam_param", value<string> (),	"内部パラメータ(.xml)ファイル名の指定")
+		("adj_color", value<string> (),	"パノラマ背景またははめ込み対象フレーム画像の色味を合わせる")
+		("help,h", "ヘルプの出力");
 
 		// オプションのマップを作成
 		variables_map vm;
@@ -122,28 +131,43 @@ int main(int argc, char** argv) {
 		notify(vm);
 
 		// 必須オプションの確認
+		// ヘルプの表示
 		if (vm.count("help")) {
-			cout << "  [option]... \n" << opt << endl;
+			cerr << "  [option]... \n" << opt << endl;
 			return -1;
 		}
 
-		// 各種オプションの値を取得
-		if (!vm.count("cam")) {
-			cout << "cam_dataファイル名は必ず指定して下さい" << endl;
+		// 各種オプションの値を取得の確認
+		if (!vm.count("pano_cam")) {
+			cerr << "cam_dataファイル名は必ず指定して下さい" << endl;
 			return -1;
 		}
 
-		if (vm.count("cam_param")) { // 内部パラメータファイル名
-			cam_param = vm["cam_param"].as<string> ();
+		// 内部パラメータファイル名の入力の確認
+		if (vm.count("cam_param")) {
+			cam_param_path = vm["cam_param"].as<string> ();
 		} else {
-			cout << "内部パラメータファイル名を指定して下さい．" << endl;
+			cerr << "内部パラメータファイル名を指定して下さい．" << endl;
 			return -1;
 		}
 
+		if(!vm.count("target_cam") && !vm.count("target_frame")){
+			cerr << "はめ込み対象を指定して下さい．" <<endl;
+			cerr << "select target_cam or target_frame" <<endl;
+		}
+
+		// レンズ歪みを修正するための，歪み系数を含む内部パラメータファイルの確認
 		if (vm.count("undist") && !vm.count("in_param")) {
-			cout << "歪み補正をかけるには内部パラメータファイル名を指定して下さい．" << endl;
+			cerr << "歪み補正をかけるには内部パラメータファイル名を指定して下さい．" << endl;
 			return -1;
 		}
+
+		if(!vm.count("panorama")){
+			cout << "パノラマ背景画像を指定して下さい．" << endl;
+			return -1;
+		}
+
+		// センサ情報から視線方向を推定し合成に利用するかの確認
 		if (vm.count("senser")) {
 			f_senser = true; // センサ情報の使用/不使用
 			dist_direction = vm["senser"].as<float> ();
@@ -152,19 +176,40 @@ int main(int argc, char** argv) {
 			dist_direction = 0.0;
 		}
 
-		 cam_data = vm["cam"].as<string> (); // 映像 センサファイル名
-		 skip = vm["start"].as<int> (); // 合成開始フレーム番号
-		 end = vm["end"].as<int> (); // 合成終了フレーム番号
-		 algorithm_type = vm["algo"].as<string> (); // 特徴点抽出記述アルゴリズム名
-		 f_comp = vm["comp"].as<bool> (); // 補完の有効無効
-		 FRAME_T = vm["inter"].as<int> (); // フレーム取得間隔
-		 blur = vm["blur"].as<int> (); // 手ブレ閾値
-		 fps = vm["fps"].as<int> (); // 書き出し動画のfps
-		 hessian = vm["hessian"].as<int> (); // SURFのhessianパラメータ
+		// はめ込み対象の指定オプションの確認(Videoファイルかフレーム画像)
+		if(vm.count("target_cam") && vm.count("target_frame")){
+			cerr << "target_cam と target_frame は同時に使用出来ません．" << endl;
+			cerr << "パノラマ背景へのはめ込みはvideoか画像フレームのどちらか一方のみ可能です．" << endl;
+			return -1;
+		}
 
-		 f_undist = vm["undist"].as<bool> (); // レンズ歪み補正
-		 save_dir = vm["outdir"].as<string> ();
-		 f_line = vm["line"].as<bool> ();
+		// はめ込み対象にcam_dataファイルを指定する場合
+		if(vm.count("target_cam")){
+			f_target_video = true;
+			target_cam_path = vm["target_cam"].as<string> ();
+		}
+
+		// はめ込み対象にフレーム画像を指定する場合
+		if(vm.count("target_frame")){
+			f_target_video = false;
+			target_frame_path = vm["target_frame"].as<string> ();
+		}
+
+		 cam_data_path = vm["cam"].as<string> (); 			// 映像 センサファイル名(default : cam_data.txt)
+		 skip = vm["start"].as<int> (); 				// 合成開始フレーム番号 (default : 0)
+		 end = vm["end"].as<int> ();					// 合成終了フレーム番号 (default : INT_MAX)
+		 algorithm_type = vm["algo"].as<string> ();	// 特徴点抽出記述アルゴリズム名 (default : SURF)
+		 //f_comp = vm["comp"].as<bool> (); 			// 補完の有効無効
+
+		 FRAME_T = vm["inter"].as<int> (); 			// フレーム取得間隔
+		 blur = vm["blur"].as<int> (); 					// 手ブレ閾値
+		 //fps = vm["fps"].as<int> (); 					// 書き出し動画のfps
+		 hessian = vm["hessian"].as<int> (); 			// SURFのhessianパラメータ
+		 f_undist = vm["undist"].as<bool> (); 			// レンズ歪み補正のフラグ (default : OFF)
+
+		 save_path = vm["outdir"].as<string> ();		// 各種ファイルの出力先の指定 (default : "./")
+		 f_line = vm["line"].as<bool> ();				// 確率的ハフ変換による特徴点のマスク
+		 str_pano = vm["panorama"].as<string> ();		// パノラマ背景画像のファイル名
 
 	} catch (exception& e) {
 		cerr << "error: " << e.what() << "\n";
@@ -177,28 +222,36 @@ int main(int argc, char** argv) {
 	feature = Feature2D::create(algorithm_type);
 	if (algorithm_type.compare("SURF") == 0) {
 		feature->set("extended", 1);
-		feature->set("hessianThreshold", 10);
+		feature->set("hessianThreshold", hessian);
 		feature->set("nOctaveLayers", 4);
 		feature->set("nOctaves", 3);
 		feature->set("upright", 0);
 	}
+
+	/*
 	if (argc != 5) {
 		cout << "Usage : " << argv[0] << "target_frame_image "
 				<< "panorama_cam_data" << "panorama_background_image"
 				<< "output_file_name" << "camera_param" << endl;
 		return -1;
 	}
+	*/
 
-	ifs_pano_cam.open(cam_data);
+	// パノラマ背景の生成に利用したcam_dataファイルの読み込み
+	ifs_pano_cam.open(cam_data_path.c_str());
 	if(!ifs_pano_cam.is_open()){
-		cout << "cannot open pano_cam_data : " << cam_data << endl;
+		cerr << "cannot open pano_cam_data : " << cam_data_path << endl;
 		return -1;
 	}
 
-	ifs_target_cam.open(cam_data);
-	if (!ifs_target_cam.is_open()) {
-		cerr << "cannnot open target_cam_data : " << argv[1] << endl;
-		return -1;
+	// はめ込み対象フレームを動画から取得する場合
+	// 対象動画のcam_dataファイルを読み込む
+	if(f_target_video){
+		ifs_target_cam.open(target_cam_path.c_str());
+		if (!ifs_target_cam.is_open()) {
+			cerr << "cannnot open target_cam_data : " << target_cam_path << endl;
+			return -1;
+		}
 	}
 
 	// パノラマ背景の元動画，TIMEファイル，ORIファイルのパスを取得
@@ -207,68 +260,97 @@ int main(int argc, char** argv) {
 	ifs_pano_cam >> str_pano_ori;
 
 	// はめ込むフレームを含む動画，TIMEファイル，ORIファイルのパスを取得
-	ifs_target_cam >> str_target_video;
-	ifs_target_cam >> str_target_time;
-	ifs_target_cam >> str_target_ori;
-
-	// パノラマ背景画像のファイル名を取得
-	str_pano = argv[3];
+	if(f_target_video){
+		ifs_target_cam >> str_target_video;
+		ifs_target_cam >> str_target_time;
+		ifs_target_cam >> str_target_ori;
+		ifs_target_cam >> target_frame_num;
+	}
 
 	// パノラマ背景画像の読み込み
+	cout << "load background image" << endl;
 	panorama = imread(str_pano);
 	if (panorama.empty()) {
 		cerr << "cannot open panorama image" << endl;
 		return -1;
 	}
-	cout << "load background image" << endl;
+	cout << "done" << endl;
 
-	target_frame = imread(argv[1], CV_LOAD_IMAGE_COLOR); // 直接合成フレームを指定する場合argv[1]に画像pathを指定する
-
-	// 合成対象のフレームのチャネルごとのヒストグラムを計算
-	get_color_hist(target_frame, target_hist_channels);
-	cout << "calc target_frame histgram" << endl;
 
 	// パノラマ背景の元動画をオープン
+	cout << "open panorama video" << endl;
 	pano_cap.open(str_pano_video);
 	if (!pano_cap.isOpened()) {
 		cerr << "cannnot open panorama src movie" << endl;
 		return -1;
 	}
+	cout << "done" << endl;
 
 	//　パノラママスク画像の読み込み
-	mask = imread("mask.jpg", CV_LOAD_IMAGE_GRAYSCALE);
 	cout << "load background mask image" << endl;
+	mask = imread("mask.jpg", CV_LOAD_IMAGE_GRAYSCALE);
+	cout << "done" << endl;
 
+	// 合成対象フレーム画像の読み込み
 	cout << "load target frame image" << endl;
-
-	if (target_frame.empty()) {
-		cerr << "cannnot load target frame" << endl;
+	if(!f_target_video){
+		// 画像フレームを指定
+		target_frame = imread(target_frame_path, CV_LOAD_IMAGE_COLOR);
+		if (target_frame.empty()) {
+			cerr << "cannnot load target frame : " << target_frame_path << endl;
+			return -1;
+		}
+	}else{
+		// cam_dataファイルから動画を開いてフレームを取得
+		target_cap.open(str_target_video);
+		target_cap.set(CV_CAP_PROP_POS_FRAMES, target_frame_num);
+		target_cap >> target_frame;
+		if (target_frame.empty()) {
+			cerr << "cannnot load target frame from video : " << endl;
+			cerr << str_target_video << " " << target_frame_path << "[frame]" << endl;
+			return -1;
+		}
 	}
+	cout << "done" << endl;
 
+	// 合成対象のフレームのチャネルごとのヒストグラムを計算
+	cout << "calc target_frame histgram" << endl;
+	get_color_hist(target_frame, target_hist_channels);
+	cout << "done" << endl;
+/*
 	pano_cap.set(CV_CAP_PROP_POS_FRAMES, s_pano);
 	double pano_frame_time = pano_cap.get(CV_CAP_PROP_POS_MSEC);
+*/
 
-	if (target_frame.empty()) {
-		cerr << "cannnot open target frame" << endl;
-		return -1;
-	}
+	// 各種ウインドウの初期化
+	namedWindow("target", 			CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+	namedWindow("panorama",		 	CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+	namedWindow("panoblack",			CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+	namedWindow("mask", 				CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+	namedWindow("matches", 			CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+	namedWindow("transform_image", 	CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+	namedWindow("result",			CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
 
-	// read camera pra
+	// read camera param
 	Mat a_tmp;
 	Mat dist;
-	FileStorage cvfs_inparam(argv[5], CV_STORAGE_READ);
+	FileStorage cvfs_inparam(cam_param_path, CV_STORAGE_READ);
 	FileNode node_inparam(cvfs_inparam.fs, NULL);
 
 	read(node_inparam["intrinsic"], a_tmp);
+	read(node_inparam["distortion"], dist);
 
 	// create white_img
 	white_img = Mat(target_frame.size(), CV_8U, Scalar::all(255));
 
-	namedWindow("target", CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+
 	imshow("target", target_frame);
-	//imwrite("target.jpg", aim_frame);
 	waitKey(30);
-	namedWindow("panorama", CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+	ss.str("");
+	ss.clear();
+	ss << save_path << "target.jpg";
+	imwrite(ss.str(), target_frame);
+
 	imshow("panorama", panorama);
 	waitKey(30);
 	Mat A1Matrix, A2Matrix;
@@ -281,7 +363,6 @@ int main(int argc, char** argv) {
 
 	cout << hh << endl;
 
-	cout << "a" << endl;
 	imshow("panorama", transform_image2);
 	waitKey(30);
 
@@ -372,7 +453,7 @@ int main(int argc, char** argv) {
 	//投影場所のマスク生成
 	warpPerspective(white_img, pano_black, homography, Size(PANO_W, PANO_H),
 			CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
-	namedWindow("panoblack", CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+
 	imshow("panoblack", pano_black);
 	waitKey(20);
 
@@ -404,7 +485,7 @@ int main(int argc, char** argv) {
 
 
 		cout << n << " >= " << pano_cap.get(CV_CAP_PROP_FRAME_COUNT) << endl;
-		if (n >= 180)
+		if (n >= 180) //最後のフレームのホモグラフィー行列が異常なので対象から省く必要があるものがある
 			break;
 
 		warpPerspective(white_img, aria1, homography, Size(PANO_W, PANO_H),
@@ -413,7 +494,7 @@ int main(int argc, char** argv) {
 		warpPerspective(white_img, aria2, tmp_base, Size(PANO_W, PANO_H),
 				CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
 		bitwise_and(aria1, aria2, aria1);
-		namedWindow("mask", CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+
 		imshow("mask", aria1);
 		waitKey(0);
 		threshold(aria1, aria2, 128, 1, THRESH_BINARY);
@@ -518,7 +599,6 @@ int main(int argc, char** argv) {
 	Canny(gray_img2, hough_src, 30, 50, 3);
 
 	imshow("detected lines", hough_src);
-	//			waitKey(0);
 
 	hough_dst = Mat(hough_src.size(), CV_8U, Scalar::all(0));
 
@@ -535,13 +615,14 @@ int main(int argc, char** argv) {
 	Mat t = hough_dst;
 	dilate(t, hough_dst, cv::Mat(), cv::Point(-1, -1), 5);
 	hough_dst = Mat(hough_src.size(), CV_8U, Scalar::all(255));
-	for (int i = 0; i < hough_dst.cols; i++)
+/*	for (int i = 0; i < hough_dst.cols; i++)
 		for (int j = 0; j < hough_dst.rows; j++) {
 			if (i > hough_dst.cols / 2.5 || i < hough_dst.cols / 8)
 				hough_dst.at<unsigned char> (j, i) = 0;
 			if (j < hough_dst.rows / 8 || j > hough_dst.rows * 3.0 / 4.0)
 				hough_dst.at<unsigned char> (j, i) = 0;
 		}
+*/
 	cvtColor(near_frame, gray_img2, CV_RGB2GRAY);
 	feature->operator ()(gray_img2, Mat(), imageKeypoints, imageDescriptors);
 
@@ -550,10 +631,8 @@ int main(int argc, char** argv) {
 	drawMatches(target_frame, objectKeypoints, near_frame, imageKeypoints,
 			matches, result);
 
-	//resize(result, r_result, Size(), 0.5, 0.5, INTER_LANCZOS4);
-
 	cout << "show matches" << endl;
-	namedWindow("matches", CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+
 	imshow("matches", result);
 	waitKey(20);
 	homography = findHomography(Mat(pt1), Mat(pt2), CV_RANSAC, 5.0);
@@ -563,7 +642,7 @@ int main(int argc, char** argv) {
 			PANO_W, PANO_H), CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
 	FileStorage fs("homography.xml", cv::FileStorage::WRITE);
 	write(fs, "homography", h_base * homography);
-	namedWindow("transform_image", CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+
 	imshow("transform_image", transform_image);
 	waitKey(0);
 
@@ -592,7 +671,7 @@ int main(int argc, char** argv) {
 	waitKey(30);
 	make_pano(transform_image, transform_image2, ~mask, pano_black);
 
-	namedWindow("result", CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+
 	imshow("result", transform_image2);
 	waitKey(30);
 	imwrite("result.jpg", transform_image2);
