@@ -1,3 +1,16 @@
+/*
+ *  単一のカメラで撮影し，生成したパノラマ背景画像に
+ *  同一カメラで同じ位置から撮影した指定のフレーム画像をはめ込むプログラム
+ *  （背景とはめ込むフレームは同一の内部パラメータ）
+ *
+ *  はめ込むフレーム画像は，動画中のフレームまたは画像ファイルで指定可能
+ *  前提として，
+ *  ・カメラの内部パラメータ及び歪み係数を記述したxmlファイル
+ *  ・パノラマ背景生成時のホモグラフィ行列を記述したxmlファイル
+ *  ・パノラマ背景を生成した際に得られるマスク画像
+ *  が必要
+ */
+
 #include <cv.h>
 #include <highgui.h>
 #include <ctype.h>
@@ -91,6 +104,7 @@ int main(int argc, char** argv) {
 	bool f_line = false; 			// 直線検出を利用
 	bool f_undist = false; 			// レンズ歪み補正
 	bool f_target_video = false;	// はめ込み対象が動画ファイル（or １枚のフレーム画像）
+	int f_adj_color = 0;				// 色調補正の有無(0:補正なし 1:背景を補正 2:フレームを補正 3:見本画像に両方合わせる)
 
 
 
@@ -102,6 +116,8 @@ int main(int argc, char** argv) {
 	string cam_param_path; 		// 内部パラメータのxmlファイル名
 	string save_path; 			// 各ファイルの保存先ディレクトリ名
 	string target_frame_path;	// 合成対象フレームのファイル名
+	string example_path;			// 色調補正の目標画像（ここで指定された画像のヒストグラムにあわせて両方に補正をかける）
+	string result_name;			// 処理結果画像ファイルの名前
 
 	try {
 		// コマンドラインオプションの定義
@@ -120,9 +136,10 @@ int main(int argc, char** argv) {
 		("senser",	value<double> ()->default_value(0.0), "センサー情報を使う際の視線方向のしきい値")
 		("line", value<bool> ()->default_value(false), "直線検出の利用")
 		("undist", value<bool> ()->default_value(false), "画像のレンズ歪み補正")
-		("outdir,o", value<string> ()->default_value("./"),"各種ファイルの出力先ディレクトリの指定")
+		("outdir", value<string> ()->default_value("./"),"各種ファイルの出力先ディレクトリの指定")
 		("cam_param", value<string> (),	"内部パラメータ(.xml)ファイル名の指定")
 		("adj_color", value<string> (),	"パノラマ背景またははめ込み対象フレーム画像の色味を合わせる")
+		("out,o", value<string> ()->default_value("target.jpg"),"処理結果画像ファイルの名前")
 		("help,h", "ヘルプの出力");
 
 		// オプションのマップを作成
@@ -136,13 +153,11 @@ int main(int argc, char** argv) {
 			cerr << "  [option]... \n" << opt << endl;
 			return -1;
 		}
-
 		// 各種オプションの値を取得の確認
 		if (!vm.count("pano_cam")) {
 			cerr << "cam_dataファイル名は必ず指定して下さい" << endl;
 			return -1;
 		}
-
 		// 内部パラメータファイル名の入力の確認
 		if (vm.count("cam_param")) {
 			cam_param_path = vm["cam_param"].as<string> ();
@@ -151,13 +166,15 @@ int main(int argc, char** argv) {
 			return -1;
 		}
 
+		cout << "c" << endl;
 		if(!vm.count("target_cam") && !vm.count("target_frame")){
 			cerr << "はめ込み対象を指定して下さい．" <<endl;
 			cerr << "select target_cam or target_frame" <<endl;
+			return -1;
 		}
 
 		// レンズ歪みを修正するための，歪み系数を含む内部パラメータファイルの確認
-		if (vm.count("undist") && !vm.count("in_param")) {
+		if (vm.count("undist") && !vm.count("cam_param")) {
 			cerr << "歪み補正をかけるには内部パラメータファイル名を指定して下さい．" << endl;
 			return -1;
 		}
@@ -170,9 +187,9 @@ int main(int argc, char** argv) {
 		// センサ情報から視線方向を推定し合成に利用するかの確認
 		if (vm.count("senser")) {
 			f_senser = true; // センサ情報の使用/不使用
-			dist_direction = vm["senser"].as<float> ();
+			dist_direction = vm["senser"].as<double> ();
 		} else {
-			f_senser = true; // センサ情報の使用/不使用
+			f_senser = false; // センサ情報の使用/不使用
 			dist_direction = 0.0;
 		}
 
@@ -195,10 +212,21 @@ int main(int argc, char** argv) {
 			target_frame_path = vm["target_frame"].as<string> ();
 		}
 
-		 cam_data_path = vm["cam"].as<string> (); 			// 映像 センサファイル名(default : cam_data.txt)
+		// 色味を補正する場合
+		if(vm.count("adj_color")){
+			example_path = vm["adj_color"].as<string> ();
+			if(example_path.compare("1") == 0)
+				f_adj_color = 1; // 背景を補正
+			else if(example_path.compare("2") == 0)
+				f_adj_color = 2;	// フレームを補正
+			else
+				f_adj_color = 3; // 見本に両方合わせる
+		}
+
+		 cam_data_path = vm["pano_cam"].as<string> (); 	// 映像 センサファイル名(default : cam_data.txt)
 		 skip = vm["start"].as<int> (); 				// 合成開始フレーム番号 (default : 0)
 		 end = vm["end"].as<int> ();					// 合成終了フレーム番号 (default : INT_MAX)
-		 algorithm_type = vm["algo"].as<string> ();	// 特徴点抽出記述アルゴリズム名 (default : SURF)
+		// algorithm_type = vm["algo"].as<string> ();	// 特徴点抽出記述アルゴリズム名 (default : SURF)
 		 //f_comp = vm["comp"].as<bool> (); 			// 補完の有効無効
 
 		 FRAME_T = vm["inter"].as<int> (); 			// フレーム取得間隔
@@ -206,11 +234,10 @@ int main(int argc, char** argv) {
 		 //fps = vm["fps"].as<int> (); 					// 書き出し動画のfps
 		 hessian = vm["hessian"].as<int> (); 			// SURFのhessianパラメータ
 		 f_undist = vm["undist"].as<bool> (); 			// レンズ歪み補正のフラグ (default : OFF)
-
 		 save_path = vm["outdir"].as<string> ();		// 各種ファイルの出力先の指定 (default : "./")
 		 f_line = vm["line"].as<bool> ();				// 確率的ハフ変換による特徴点のマスク
 		 str_pano = vm["panorama"].as<string> ();		// パノラマ背景画像のファイル名
-
+		 result_name = vm["out"].as<string> ();		// 処理結果画像のファイル名を取得
 	} catch (exception& e) {
 		cerr << "error: " << e.what() << "\n";
 		return -1;
@@ -289,6 +316,10 @@ int main(int argc, char** argv) {
 	//　パノラママスク画像の読み込み
 	cout << "load background mask image" << endl;
 	mask = imread("mask.jpg", CV_LOAD_IMAGE_GRAYSCALE);
+	if (mask.empty()) {
+			cerr << "cannot open mask image" << endl;
+			return -1;
+		}
 	cout << "done" << endl;
 
 	// 合成対象フレーム画像の読み込み
@@ -296,6 +327,7 @@ int main(int argc, char** argv) {
 	if(!f_target_video){
 		// 画像フレームを指定
 		target_frame = imread(target_frame_path, CV_LOAD_IMAGE_COLOR);
+		cout << target_frame_path << endl;
 		if (target_frame.empty()) {
 			cerr << "cannnot load target frame : " << target_frame_path << endl;
 			return -1;
@@ -314,9 +346,12 @@ int main(int argc, char** argv) {
 	cout << "done" << endl;
 
 	// 合成対象のフレームのチャネルごとのヒストグラムを計算
-	cout << "calc target_frame histgram" << endl;
-	get_color_hist(target_frame, target_hist_channels);
-	cout << "done" << endl;
+	if(f_adj_color != 0){
+		// 色見補正のオプションが指定されていたら
+		cout << "calc target_frame histgram" << endl;
+		get_color_hist(target_frame, target_hist_channels);
+		cout << "done" << endl;
+	}
 /*
 	pano_cap.set(CV_CAP_PROP_POS_FRAMES, s_pano);
 	double pano_frame_time = pano_cap.get(CV_CAP_PROP_POS_MSEC);
@@ -346,11 +381,14 @@ int main(int argc, char** argv) {
 
 	imshow("target", target_frame);
 	waitKey(30);
-	ss.str("");
-	ss.clear();
-	ss << save_path << "target.jpg";
-	imwrite(ss.str(), target_frame);
-
+	if(f_target_video){
+		ss.str("");
+		ss.clear();
+		ss << save_path << "target-" << setfill('0') << setw(5)
+				<< right << target_frame_num << ".jpg";
+		imwrite(ss.str(), target_frame);
+		cout << "save target frame from video to : " << ss.str() << endl;
+	}
 	imshow("panorama", panorama);
 	waitKey(30);
 	Mat A1Matrix, A2Matrix;
@@ -362,7 +400,7 @@ int main(int argc, char** argv) {
 	A1Matrix = Mat::eye(3, 3, CV_64FC1);
 
 	cout << hh << endl;
-
+	transform_image2 = panorama.clone();
 	imshow("panorama", transform_image2);
 	waitKey(30);
 
@@ -431,6 +469,7 @@ int main(int argc, char** argv) {
 	cvtColor(target_frame, gray_img1, CV_RGB2GRAY);
 	cvtColor(panorama, gray_img2, CV_RGB2GRAY);
 	erode(mask, mask2, cv::Mat(), cv::Point(-1, -1), 50);
+
 	feature->operator ()(gray_img1, Mat(), objectKeypoints, objectDescriptors);
 	feature->operator ()(gray_img2, mask2, imageKeypoints, imageDescriptors);
 
@@ -461,7 +500,6 @@ int main(int argc, char** argv) {
 
 	Mat h_base;
 	Mat tmp_base;
-	stringstream ss;
 	long n = 0;
 	Mat aria1, aria2;
 	Mat v1, v2;
@@ -484,8 +522,8 @@ int main(int argc, char** argv) {
 		// tmp_baseが空なら取り出し終わっているので下でブレイク処理に入る
 
 
-		cout << n << " >= " << pano_cap.get(CV_CAP_PROP_FRAME_COUNT) << endl;
-		if (n >= 180) //最後のフレームのホモグラフィー行列が異常なので対象から省く必要があるものがある
+		//cout << n << " >= " << pano_cap.get(CV_CAP_PROP_FRAME_COUNT) << endl;
+		if (n >= pano_cap.get(CV_CAP_PROP_FRAME_COUNT)) //最後のフレームのホモグラフィー行列が異常なので対象から省く必要があるものがある
 			break;
 
 		warpPerspective(white_img, aria1, homography, Size(PANO_W, PANO_H),
@@ -496,7 +534,7 @@ int main(int argc, char** argv) {
 		bitwise_and(aria1, aria2, aria1);
 
 		imshow("mask", aria1);
-		waitKey(0);
+		waitKey(20);
 		threshold(aria1, aria2, 128, 1, THRESH_BINARY);
 
 		long sum;
@@ -509,7 +547,7 @@ int main(int argc, char** argv) {
 			detect_frame_num = n;
 			cout << "detect near : " << detect_frame_num << endl;
 		}
-
+/*
 		double homo_norm, min_norm = DBL_MAX;
 		homo_norm = norm(homography - tmp_base);
 		if (homo_norm < min_norm) {
@@ -517,6 +555,7 @@ int main(int argc, char** argv) {
 			detect_frame_num = n;
 			h_base = tmp_base.clone();
 		}
+		*/
 		//tmp_base.release();
 
 	}
@@ -542,59 +581,60 @@ int main(int argc, char** argv) {
 	pano_cap >> near_frame;
 
 	// 合成対象のフレームと最も近いフレームパノラマ背景のフレームのチャネルごとのヒストグラムを計算
-	get_color_hist(target_frame, near_hist_channels);
-	cout << "calc near_frame histgram" << endl;
+	if(f_adj_color != 0){
+		get_color_hist(target_frame, near_hist_channels);
+		cout << "calc near_frame histgram" << endl;
 
-	// 各チャネルに
-	// 0.8-1.2間で0.1刻みでバイアスを変えながらヒストグラムの類似度を計算
-	uchar lut[256];
-	float est_gamma[3] = { 0.0, 0.0, 0.0 };
-	double min_hist_distance[3] = { DBL_MAX, DBL_MAX, DBL_MAX };
-	float gamma[3] = { 0.5, 0.5, 0.5 };
-	vector<Mat> near_channels, target_channels;
-	Mat gray_hist, tmp_channel, diff_img;
-	split(near_frame, near_channels);
-	split(target_frame, target_channels);
+		// 各チャネルに
+		// 0.8-1.2間で0.1刻みでバイアスを変えながらヒストグラムの類似度を計算
+		uchar lut[256];
+		float est_gamma[3] = { 0.0, 0.0, 0.0 };
+		double min_hist_distance[3] = { DBL_MAX, DBL_MAX, DBL_MAX };
+		float gamma[3] = { 0.5, 0.5, 0.5 };
+		vector<Mat> near_channels, target_channels;
+		Mat gray_hist, tmp_channel, diff_img;
+		split(near_frame, near_channels);
+		split(target_frame, target_channels);
 
-	// パノラマ背景の色合いを合成対象フレームに近づけるgammaを計算
-	for (int i = 0; i < 3; i++) {
+		// パノラマ背景の色合いを合成対象フレームに近づけるgammaを計算
+		for (int i = 0; i < 3; i++) {
 
-		// LUTの生成
-		for (; gamma[i] < 2.0; gamma[i] += 0.001) {
-			for (int j = 0; j < 256; j++)
-				lut[j] = (j * gamma[i] <= 255) ? j * gamma[i] : 255;
+			// LUTの生成
+			for (; gamma[i] < 2.0; gamma[i] += 0.001) {
+				for (int j = 0; j < 256; j++)
+					lut[j] = (j * gamma[i] <= 255) ? j * gamma[i] : 255;
 
-			LUT(near_channels[i], Mat(Size(256, 1), CV_8U, lut), tmp_channel);
-			get_gray_hist(tmp_channel, gray_hist);
+				LUT(near_channels[i], Mat(Size(256, 1), CV_8U, lut), tmp_channel);
+				get_gray_hist(tmp_channel, gray_hist);
 
-			double hist_distance = compareHist(gray_hist,
-					target_hist_channels[i], CV_COMP_CHISQR);
-			//cout << "dist : " << hist_distance << endl;
-			if (hist_distance < min_hist_distance[i]) {
-				est_gamma[i] = gamma[i];
-				min_hist_distance[i] = hist_distance;
+				double hist_distance = compareHist(gray_hist,
+						target_hist_channels[i], CV_COMP_CHISQR);
+				//cout << "dist : " << hist_distance << endl;
+				if (hist_distance < min_hist_distance[i]) {
+					est_gamma[i] = gamma[i];
+					min_hist_distance[i] = hist_distance;
+				}
 			}
 		}
+
+		cout << " <est_gamma> " << endl;
+		cout << est_gamma[0] << " : " << est_gamma[1] << " : " << est_gamma[2]
+		                                                                    << endl;
+
+		for (int i = 0; i < 3; i++) {
+			for (int j = 0; j < 256; j++)
+				lut[j] = (j * est_gamma[i] <= 255) ? j * est_gamma[i] : 255;
+			LUT(near_channels[i], Mat(Size(256, 1), CV_8U, lut), result);
+			near_channels[i] = result.clone();
+		}
+
+		Mat fix_near_image;
+		merge(near_channels, fix_near_image);
+		LUT(transform_image2, Mat(Size(256, 1), CV_8U, lut), result);
+		transform_image2 = result.clone();
+		imwrite("fix_test.jpg", transform_image2);
 	}
-
-	cout << " <est_gamma> " << endl;
-	cout << est_gamma[0] << " : " << est_gamma[1] << " : " << est_gamma[2]
-			<< endl;
-
-	for (int i = 0; i < 3; i++) {
-		for (int j = 0; j < 256; j++)
-			lut[j] = (j * est_gamma[i] <= 255) ? j * est_gamma[i] : 255;
-		LUT(near_channels[i], Mat(Size(256, 1), CV_8U, lut), result);
-		near_channels[i] = result.clone();
-	}
-
-	Mat fix_near_image;
-	merge(near_channels, fix_near_image);
-	LUT(transform_image2, Mat(Size(256, 1), CV_8U, lut), result);
-	//transform_image2 = result.clone();
-	imwrite("fix_test.jpg", transform_image2);
-
-	Mat hough_src, hough_dst; // ハフ変換の入力と，検出した線の出力先
+/*	Mat hough_src, hough_dst; // ハフ変換の入力と，検出した線の出力先
 	cvtColor(near_frame, gray_img2, CV_RGB2GRAY);
 	Canny(gray_img2, hough_src, 30, 50, 3);
 
@@ -615,6 +655,7 @@ int main(int argc, char** argv) {
 	Mat t = hough_dst;
 	dilate(t, hough_dst, cv::Mat(), cv::Point(-1, -1), 5);
 	hough_dst = Mat(hough_src.size(), CV_8U, Scalar::all(255));
+	*/
 /*	for (int i = 0; i < hough_dst.cols; i++)
 		for (int j = 0; j < hough_dst.rows; j++) {
 			if (i > hough_dst.cols / 2.5 || i < hough_dst.cols / 8)
@@ -644,7 +685,7 @@ int main(int argc, char** argv) {
 	write(fs, "homography", h_base * homography);
 
 	imshow("transform_image", transform_image);
-	waitKey(0);
+	waitKey(20);
 
 	/*
 	 //投影先での対応点を再計算
@@ -667,14 +708,18 @@ int main(int argc, char** argv) {
 	 */
 
 	bitwise_and(mask, pano_black, mask);
-	imshow("panoblack", transform_image2);
+	imshow("panoblack", pano_black);
 	waitKey(30);
 	make_pano(transform_image, transform_image2, ~mask, pano_black);
 
 
 	imshow("result", transform_image2);
 	waitKey(30);
-	imwrite("result.jpg", transform_image2);
+
+	ss.str("");
+	ss.clear();
+	ss << save_path << result_name;
+	imwrite(ss.str(), transform_image2);
 
 	return 0;
 }
