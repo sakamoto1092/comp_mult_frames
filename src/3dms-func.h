@@ -18,7 +18,7 @@ typedef struct{
 int DispSensorData(SENSOR_DATA sd);
 
 // ���󥵥ǡ����ե����뤫����ɤ߹���
-int LoadSensorData(char *oridatafile ,SENSOR_DATA *sd_array[]);
+int LoadSensorData(const char *oridatafile ,SENSOR_DATA *sd_array[]);
 //int LoadSensorData(char *timedatafile,char *accdatafile,char *magdatafile,char *oridatafile , SENSOR_DATA *sd_array[]);
 
 // ���󥵥ǡ�������֤��ƻ���Υѥ�᡼���򻻽Ф���
