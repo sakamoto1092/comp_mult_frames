@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
 
 	Mat panorama, target_frame, near_frame;        // パノラマ画像，合成対象フレーム画像，近傍背景画像
 	Mat homography;									 // ホモグラフィ行列
-
+	Mat dist_src;
 	ifstream ifs_target_cam;							 // target_camファイルストリーム
 	ifstream ifs_pano_cam;							 // pano_cam　ファイルストリーム
 	long s_pano;
@@ -343,8 +343,9 @@ int main(int argc, char** argv) {
 	}else{
 		// cam_dataファイルから動画を開いてフレームを取得
 		target_cap.open(str_target_video);
-		target_cap.set(CV_CAP_PROP_POS_FRAMES, target_frame_num);
-		target_cap >> target_frame;
+		//target_cap.set(CV_CAP_PROP_POS_FRAMES, target_frame_num);
+		for(int i = 0; i < target_frame_num+1;i++)
+			target_cap >> target_frame;
 		target_frame_time = target_cap.get(CV_CAP_PROP_POS_MSEC)/1000.0;
 		if (target_frame.empty()) {
 			cerr << "cannnot load target frame from video : " << endl;
@@ -410,6 +411,7 @@ int main(int argc, char** argv) {
 	Mat hh = Mat::eye(3, 3, CV_64FC1);
 	A1Matrix = Mat::eye(3, 3, CV_64FC1);
 
+	A1Matrix = a_tmp.inv();
 	cout << hh << endl;
 	transform_image2 = panorama.clone();
 	imshow("panorama", transform_image2);
@@ -481,6 +483,8 @@ int main(int argc, char** argv) {
 	Mat result, r_result;
 	// パノラマ画像と合成したいフレームの特徴点抽出と記述
 	cout << "calc features" << endl;
+	dist_src = target_frame.clone();
+	//undistort(dist_src,target_frame,A1Matrix,dist);
 	cvtColor(target_frame, gray_img1, CV_RGB2GRAY);
 	//cvtColor(panorama, gray_img2, CV_RGB2GRAY);
 	//erode(mask, mask2, cv::Mat(), cv::Point(-1, -1), 50);
@@ -654,11 +658,14 @@ int main(int argc, char** argv) {
 */
 	ss << "homo_" << detect_frame_num;
 	//ss << "homo_" << 3041;
-	read(node[ss.str()], h_base);
+	read(node[ss.str()], tmp_base);
+	h_base = tmp_base.clone();
 	ss.clear();
 	ss.str("");
-	pano_cap.set(CV_CAP_PROP_POS_FRAMES, detect_frame_num);
-	pano_cap >> near_frame;
+	pano_cap.set(CV_CAP_PROP_POS_FRAMES, 0);
+	for(int i = 0; i < detect_frame_num+1;i++)
+		pano_cap >> near_frame;
+	imwrite("near_frame.jpg",near_frame);
 
 	imshow("base frame",near_frame);
 	// 合成対象のフレームと最も近いフレームパノラマ背景のフレームのチャネルごとのヒストグラムを計算
@@ -750,6 +757,8 @@ int main(int argc, char** argv) {
 		}
 */
 	// 視線方向が近いフレーム画像から特徴点を抽出しマッチング
+	dist_src = near_frame.clone();
+	//undistort(dist_src,near_frame,A1Matrix,dist);
 	cvtColor(near_frame, gray_img2, CV_RGB2GRAY);
 	feature->operator ()(gray_img2, Mat(), imageKeypoints, imageDescriptors);
 
