@@ -24,6 +24,7 @@
 #include <vector>
 #include <fstream>
 #include <boost/program_options.hpp>
+#include <sys/time.h>
 #include "3dms-func.h"
 
 // パノラマ画像の大きさ
@@ -119,6 +120,15 @@ int main(int argc, char** argv) {
 	string target_frame_path; // 合成対象フレームのファイル名
 	string example_path; // 色調補正の目標画像（ここで指定された画像のヒストグラムにあわせて両方に補正をかける）
 	string result_name; // 処理結果画像ファイルの名前
+
+	time_t timer;          // 日付取得用
+	struct tm *local;       // 日付取得用
+
+	struct timeval t0, t1; // 処理時間計算用変数 t0:start t1:end
+
+	timer = time(NULL);			// 現在時間の取得
+	local = localtime(&timer);  // 地方時間に変換
+	gettimeofday(&t0,NULL); // 開始時刻の取得
 
 	try {
 		// コマンドラインオプションの定義
@@ -803,7 +813,6 @@ int main(int argc, char** argv) {
 	}
 	imwrite("img1.jpg", surf_img);
 
-	cout << "a" << endl;
 	surf_img = near_frame.clone();
 	for (int i = 0; i < imageKeypoints.size(); i++) {
 		bool flag = false;
@@ -823,7 +832,7 @@ int main(int argc, char** argv) {
 		circle(surf_img, center, radius, Scalar(255, 255, 0), 1, 8, 0);
 	}
 	imwrite("img2.jpg", surf_img);
-	cout << "aa" << endl;
+
 	//imshow("matches", result);
 	//waitKey(0);
 
@@ -846,7 +855,7 @@ int main(int argc, char** argv) {
 			PANO_H), CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
 	warpPerspective(white_img, pano_black,  A2Matrix*A1Matrix.inv()*homography, Size(
 			PANO_W, PANO_H), CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
-	cout << "aa" << endl;
+
 	imwrite("test_black.jpg", pano_black);
 	make_pano(target_frame, near_frame, ~pano_black, pano_black);
 
@@ -885,7 +894,7 @@ int main(int argc, char** argv) {
 	 imshow("matches", result);
 	 waitKey(30);
 	 */
-	cout << "aa" << endl;
+
 	Mat tmp_result;
 	mask2 = mask.clone();
 	bitwise_and(mask, pano_black, mask2);
@@ -897,8 +906,10 @@ int main(int argc, char** argv) {
 	ss.clear();
 	ss << save_path << result_name;
 	imwrite(ss.str(), transform_image2);
-	// TODO :回転の微調整をする
 
+
+	// TODO :回転の微調整をする
+	/*
 	int count = 0;
 	//	for (double alpha = -2.0; alpha < 2; alpha += 0.5) {
 	//		for (double beta = -2.0; beta < 2; beta += 0.5) {
@@ -927,9 +938,22 @@ int main(int argc, char** argv) {
 	//			}
 	//		}
 	//	}
-
+	*/
 	//imshow("result", transform_image2);
 	//waitKey(30);
+
+	gettimeofday(&t1,NULL);
+
+	ofstream ofs("processing_time.txt");
+	ofs << local->tm_year + 1900 << "/" << local->tm_mon + 1 << "/" <<  local->tm_mday
+		 <<	" " << local->tm_hour << ":" << local->tm_min << ":" << local->tm_sec << " "
+		 <<  local->tm_isdst << endl;
+	ofs << "<start>" << "\n" << t0.tv_sec << "." << t0.tv_usec << "[sec]" << endl;
+	ofs << "<end>" << "\n" << t1.tv_sec << "." << t1.tv_usec << "[sec]" << endl;
+	if(t1.tv_usec < t0.tv_usec)
+		ofs << "<processing_time>" << "\n" << t1.tv_sec-t0.tv_sec - 1.0<< "." << 1000000 + t1.tv_usec-t0.tv_usec << "[sec]" << endl;
+	else
+		ofs << "<processing_time>" << "\n" << t1.tv_sec-t0.tv_sec << "." <<  t1.tv_usec-t0.tv_usec << "[sec]" << endl;
 
 	return 0;
 }
