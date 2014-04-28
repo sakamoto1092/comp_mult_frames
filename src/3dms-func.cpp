@@ -4,10 +4,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <cv.h>
-#include <highgui.h>
+#include<opencv.hpp>
 #include "3dms-func.h"
-
+#include<iostream>
 using namespace cv;
 using namespace std;
 #define PANO_W 6000
@@ -61,7 +60,7 @@ int LoadSensorData(const char *oridatafile, SENSOR_DATA *sd_array[]) {
 int GetSensorDataForTime(double TT, // �������
 		SENSOR_DATA *in_sd_array[], // ���ϥǡ���(����)
 		SENSOR_DATA *out_sd // ���ϥǡ���(����ʬ)
-) {
+		) {
 	int i = 0;
 	double s;
 	SENSOR_DATA *sd0, *sd1;
@@ -101,10 +100,10 @@ int GetSensorDataForTime(double TT, // �������
 		sd0->alpha = sd0->alpha - 360;
 	if (sd1->alpha > 180)
 		sd1->alpha = sd1->alpha - 360;
-	if (sd0-> beta > 180)
-		sd0-> beta = sd0-> beta - 360;
-	if (sd1-> beta > 180)
-		sd1-> beta = sd1-> beta - 360;
+	if (sd0->beta > 180)
+		sd0->beta = sd0->beta - 360;
+	if (sd1->beta > 180)
+		sd1->beta = sd1->beta - 360;
 	if (sd0->gamma > 180)
 		sd0->gamma = sd0->gamma - 360;
 	if (sd1->gamma > 180)
@@ -126,10 +125,10 @@ int SetTiltRotationMatrix(Mat *tiltMatrix, double tilt_deg) {
 	double tilt_angle;
 
 	tilt_angle = tilt_deg / 180.0 * M_PI;
-	(*tiltMatrix).at<double> (1, 1) = cos(tilt_angle);
-	(*tiltMatrix).at<double> (1, 2) = -sin(tilt_angle);
-	(*tiltMatrix).at<double> (2, 1) = sin(tilt_angle);
-	(*tiltMatrix).at<double> (2, 2) = cos(tilt_angle);
+	(*tiltMatrix).at<double>(1, 1) = cos(tilt_angle);
+	(*tiltMatrix).at<double>(1, 2) = -sin(tilt_angle);
+	(*tiltMatrix).at<double>(2, 1) = sin(tilt_angle);
+	(*tiltMatrix).at<double>(2, 2) = cos(tilt_angle);
 
 	//	cvmSet(tiltMatrix, 1, 1, cos(tilt_angle));
 	//	cvmSet(tiltMatrix, 1, 2, -sin(tilt_angle));
@@ -142,10 +141,10 @@ int SetPanRotationMatrix(Mat *panMatrix, double pan_deg) {
 	double pan_angle;
 	pan_angle = pan_deg / 180.0 * M_PI;
 
-	(*panMatrix).at<double> (2, 2) = cos(pan_angle);
-	(*panMatrix).at<double> (2, 0) = -sin(pan_angle);
-	(*panMatrix).at<double> (0, 2) = sin(pan_angle);
-	(*panMatrix).at<double> (0, 0) = cos(pan_angle);
+	(*panMatrix).at<double>(2, 2) = cos(pan_angle);
+	(*panMatrix).at<double>(2, 0) = -sin(pan_angle);
+	(*panMatrix).at<double>(0, 2) = sin(pan_angle);
+	(*panMatrix).at<double>(0, 0) = cos(pan_angle);
 	//	cvmSet(panMatrix, 2, 2, cos(pan_angle));
 	//	cvmSet(panMatrix, 2, 0, -sin(pan_angle));
 	//	cvmSet(panMatrix, 0, 2, sin(pan_angle));
@@ -158,10 +157,10 @@ int SetRollRotationMatrix(Mat *rollMatrix, double roll_deg) {
 	double roll_angle;
 
 	roll_angle = roll_deg / 180.0 * M_PI;
-	(*rollMatrix).at<double> (0, 0) = cos(roll_angle);
-	(*rollMatrix).at<double> (0, 1) = -sin(roll_angle);
-	(*rollMatrix).at<double> (1, 0) = sin(roll_angle);
-	(*rollMatrix).at<double> (1, 1) = cos(roll_angle);
+	(*rollMatrix).at<double>(0, 0) = cos(roll_angle);
+	(*rollMatrix).at<double>(0, 1) = -sin(roll_angle);
+	(*rollMatrix).at<double>(1, 0) = sin(roll_angle);
+	(*rollMatrix).at<double>(1, 1) = cos(roll_angle);
 	//	cvmSet(rollMatrix, 0, 0, cos(roll_angle));
 	//	cvmSet(rollMatrix, 0, 1, -sin(roll_angle));
 	//	cvmSet(rollMatrix, 1, 0, sin(roll_angle));
@@ -174,10 +173,10 @@ int SetPitchRotationMatrix(Mat *pitchMatrix, double pitch_deg) {
 	double pitch_angle;
 
 	pitch_angle = pitch_deg / 180.0 * M_PI;
-	(*pitchMatrix).at<double> (1, 1) = cos(pitch_angle);
-	(*pitchMatrix).at<double> (1, 2) = -sin(pitch_angle);
-	(*pitchMatrix).at<double> (2, 1) = sin(pitch_angle);
-	(*pitchMatrix).at<double> (2, 2) = cos(pitch_angle);
+	(*pitchMatrix).at<double>(1, 1) = cos(pitch_angle);
+	(*pitchMatrix).at<double>(1, 2) = -sin(pitch_angle);
+	(*pitchMatrix).at<double>(2, 1) = sin(pitch_angle);
+	(*pitchMatrix).at<double>(2, 2) = cos(pitch_angle);
 	//	cvmSet(pitchMatrix, 1, 1, cos(pitch_angle));
 	//	cvmSet(pitchMatrix, 1, 2, -sin(pitch_angle));
 	//	cvmSet(pitchMatrix, 2, 1, sin(pitch_angle));
@@ -190,10 +189,10 @@ int SetYawRotationMatrix(Mat *yawMatrix, double yaw_deg) {
 	double yaw_angle;
 
 	yaw_angle = yaw_deg / 180.0 * M_PI;
-	(*yawMatrix).at<double> (2, 2) = cos(yaw_angle);
-	(*yawMatrix).at<double> (2, 0) = -sin(yaw_angle);
-	(*yawMatrix).at<double> (0, 2) = sin(yaw_angle);
-	(*yawMatrix).at<double> (0, 0) = cos(yaw_angle);
+	(*yawMatrix).at<double>(2, 2) = cos(yaw_angle);
+	(*yawMatrix).at<double>(2, 0) = -sin(yaw_angle);
+	(*yawMatrix).at<double>(0, 2) = sin(yaw_angle);
+	(*yawMatrix).at<double>(0, 0) = cos(yaw_angle);
 	//	cvmSet(yawMatrix, 2, 2, cos(yaw_angle));
 	//	cvmSet(yawMatrix, 2, 0, -sin(yaw_angle));
 	//	cvmSet(yawMatrix, 0, 2, sin(yaw_angle));
@@ -203,9 +202,9 @@ int SetYawRotationMatrix(Mat *yawMatrix, double yaw_deg) {
 
 void setHomographyReset(Mat* homography) {
 	cvZero(homography);
-	(*homography).at<double> (0, 0) = 1;
-	(*homography).at<double> (1, 1) = 1;
-	(*homography).at<double> (2, 2) = 1;
+	(*homography).at<double>(0, 0) = 1;
+	(*homography).at<double>(1, 1) = 1;
+	(*homography).at<double>(2, 2) = 1;
 	//cvmSet(homography, 0, 0, 1);
 	//cvmSet(homography, 1, 1, 1);
 	//cvmSet(homography, 2, 2, 1);
@@ -214,7 +213,7 @@ void setHomographyReset(Mat* homography) {
 double compareSURFDescriptors(const float* d1, const float* d2, double best,
 		int length) {
 	double total_cost = 0;
-	assert( length % 4 == 0 );
+	assert(length % 4 == 0);
 	for (int i = 0; i < length; i += 4) {
 		double t0 = d1[i] - d2[i];
 		double t1 = d1[i + 1] - d2[i + 1];
@@ -237,7 +236,6 @@ void get_histimage(Mat image, Mat *hist_image) {
 	int channels[] = { 0 }; // ヒストグラムを求めるチャネル指定
 	int dims = 1; // 求めるヒストグラムの数
 
-
 	float max_dev = FLT_MIN, min_dev = FLT_MAX; // エッジ画像におけるヒストグラムの分散のmin max
 	float max_mean = FLT_MIN, min_mean = FLT_MAX; // エッジ画像におけるヒストグラムの平均のmin max
 	float sum_mean = 0.0;
@@ -254,7 +252,7 @@ void get_histimage(Mat image, Mat *hist_image) {
 					true, false);
 
 			meanStdDev(hist, mean, dev);
-			count.at<float> (i, j) = dev[0];
+			count.at<float>(i, j) = dev[0];
 
 			if (dev[0] < min_dev)
 				min_dev = dev[0];
@@ -267,16 +265,18 @@ void get_histimage(Mat image, Mat *hist_image) {
 				max_mean = mean[0];
 
 			sum_mean += mean[0];
-			std::cout << "count : " << mean << std::endl;
+			//std::cout << "count : " << mean << std::endl;
 
 			minMaxLoc(hist, NULL, &max_value, NULL, NULL);
 			hist *= hist_image[i * 10 + j].rows / max_value;
 			bin_w = cvRound((double) 260 / 256);
 
 			for (int k = 0; k < 256; k++)
-				rectangle(hist_image[i * 10 + j], Point(k * bin_w, hist_image[i
-						* 10 + j].rows), cvPoint((k + 1) * bin_w, hist_image[i
-						* 10 + j].rows - cvRound(hist.at<float> (k))),
+				rectangle(hist_image[i * 10 + j],
+						Point(k * bin_w, hist_image[i * 10 + j].rows),
+						cvPoint((k + 1) * bin_w,
+								hist_image[i * 10 + j].rows
+										- cvRound(hist.at<float>(k))),
 						cvScalarAll(0), -1, 8, 0);
 			roi_rect.width = tmp_img.cols;
 			roi_rect.height = tmp_img.rows;
@@ -307,31 +307,37 @@ void make_pano(Mat src, Mat dst, Mat mask, Mat roi) {
 		int w = src.cols;
 		for (int i = 0; i < w; i++) {
 			for (int j = 0; j < h; j++) {
-				if (mask.at<unsigned char> (j, i) == 0) {
-
-					dst.at<Vec3b> (j, i) = src.at<Vec3b> (j, i);
-					if (roi.at<unsigned char> (j, i) == 255)
-						mask.at<unsigned char> (j, i) = roi.at<unsigned char> (
-								j, i);
+				if (mask.at<unsigned char>(j, i) == 255
+						&& roi.at<unsigned char>(j, i) == 255) {
+					Vec3f a = dst.at<Vec3b>(j, i);
+					Vec3f b = src.at<Vec3b>(j, i);
+					dst.at<Vec3b>(j, i) = (a * pano_count.at<float>(j, i) + b)
+							/ (pano_count.at<float>(j, i) + 1.0);
 				}
+				if (mask.at<unsigned char>(j, i) == 0) {
+					dst.at<Vec3b>(j, i) = src.at<Vec3b>(j, i);
+					if (roi.at<unsigned char>(j, i) == 255)
+						mask.at<unsigned char>(j, i) = roi.at<unsigned char>(j,
+								i);
+				}
+				pano_count.at<float>(j, i)++;}
 			}
 		}
 	}
-}
 
-/* より良い対応点を選択する
- *
- * @Param descriptors1 特徴量１
- * @Param descriptors2 特徴量２
- * @Param key1         特徴点１
- * @Param key2         特徴点２
- * @Param matches      良いマッチングの格納先
- * @Param pt1          良いマッチングの特徴点座標１
- * @Param pt2          良いマッチングの特徴点座標２
- */
+	/* より良い対応点を選択する
+	 *
+	 * @Param descriptors1 特徴量１
+	 * @Param descriptors2 特徴量２
+	 * @Param key1         特徴点１
+	 * @Param key2         特徴点２
+	 * @Param matches      良いマッチングの格納先
+	 * @Param pt1          良いマッチングの特徴点座標１
+	 * @Param pt2          良いマッチングの特徴点座標２
+	 */
 void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
-		vector<KeyPoint> *key2, std::vector<cv::DMatch> *matches, vector<
-				Point2f> *pt1, vector<Point2f> *pt2) {
+		vector<KeyPoint> *key2, std::vector<cv::DMatch> *matches,
+		vector<Point2f> *pt1, vector<Point2f> *pt2) {
 
 	FlannBasedMatcher matcher;
 	//BFMatcher matcher(cv::NORM_L2, true);
@@ -343,8 +349,8 @@ void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
 
 	cout << key1->size() << endl;
 	cout << key2->size() << endl;
-	cout << descriptors1.size() << endl;
-	cout << descriptors2.size() << endl;
+	//cout << descriptors1.size() << endl;
+	//cout << descriptors2.size() << endl;
 
 	matcher.knnMatch(descriptors1, descriptors2, matches12, knn);
 	matcher.knnMatch(descriptors2, descriptors1, matches21, knn);
@@ -382,10 +388,10 @@ void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
 	pt1->clear();
 	pt2->clear();
 	for (int i = 0; i < (int) tmp_matches.size(); i++) {
-		if (round((*key1)[tmp_matches[i].queryIdx].class_id) == round(
-				(*key2)[tmp_matches[i].trainIdx].class_id)) {
-			if (tmp_matches[i].distance > 0 && tmp_matches[i].distance
-					< (min_dist+0.1) * 10) {
+		if (round((*key1)[tmp_matches[i].queryIdx].class_id)
+				== round((*key2)[tmp_matches[i].trainIdx].class_id)) {
+			if (tmp_matches[i].distance > 0
+					&& tmp_matches[i].distance < (min_dist + 0.1) * 20) {
 				//		  &&	(fabs(objectKeypoints[matches[i].queryIdx].pt.y - imageKeypoints[matches[i].trainIdx].pt.y)
 				//		/ fabs(objectKeypoints[matches[i].queryIdx].pt.x - 	imageKeypoints[matches[i].trainIdx].pt.x)) < 0.1) {
 				//				cout << "i : " << i << endl;
@@ -442,9 +448,10 @@ void get_gray_hist(Mat image, Mat &hist_channel) {
 	int histSize[] = { binNum }; // チャネルごとのヒストグラムの量子化の値
 	int channels[] = { 0 }; // ヒストグラムを求めるチャネル指定
 	int dims = 1; // 求めるヒストグラムの数
-	int hist_w = 512; int hist_h = 400;
-	int bin_w = cvRound( (double) hist_w/histSize[0] );
-	Mat histImage( hist_h, hist_w, CV_8UC3, Scalar( 0,0,0) );
+	int hist_w = 512;
+	int hist_h = 400;
+	int bin_w = cvRound((double) hist_w / histSize[0]);
+	Mat histImage(hist_h, hist_w, CV_8UC3, Scalar(0, 0, 0));
 
 	calcHist(&image, 1, channels, Mat(), hist, dims, histSize, range, true,
 			false);
@@ -453,9 +460,10 @@ void get_gray_hist(Mat image, Mat &hist_channel) {
 	hist_channel = hist.clone();
 
 	for (int i = 1; i < binNum; i++) {
-		line(histImage, Point(bin_w * (i - 1), hist_h - cvRound(
-				hist.at<float> (i - 1))), Point(bin_w * (i), hist_h
-				- cvRound(hist.at<float> (i))), Scalar(255, 0, 0), 2, 8, 0);
+		line(histImage,
+				Point(bin_w * (i - 1), hist_h - cvRound(hist.at<float>(i - 1))),
+				Point(bin_w * (i), hist_h - cvRound(hist.at<float>(i))),
+				Scalar(255, 0, 0), 2, 8, 0);
 	}
 	//imshow("hist",histImage);
 	//waitKey();

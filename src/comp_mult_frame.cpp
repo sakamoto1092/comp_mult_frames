@@ -10,17 +10,15 @@
  *  ・パノラマ背景を生成した際に得られるマスク画像
  *  が必要
  */
-
-#include <cv.h>
-#include <highgui.h>
+#include<opencv.hpp>
+#include<nonfree/nonfree.hpp>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include<opencv2/nonfree/nonfree.hpp>
-#include<opencv2/nonfree/features2d.hpp>
 #include <sstream>
 #include <string>
 #include <iostream>
+#include<iomanip>
 #include <vector>
 #include <fstream>
 #include <boost/program_options.hpp>
@@ -71,7 +69,7 @@ int main(int argc, char** argv) {
 
 	Mat mask = Mat(Size(PANO_W, PANO_H), CV_8U, Scalar::all(0)); // パノラマ画像のマスク
 	Mat pano_black = Mat(Size(PANO_W, PANO_H), CV_8U, Scalar::all(0)); // パノラマ画像と同じサイズの黒画像
-	Mat white_img = Mat(Size(1280, 720), CV_8U, Scalar::all(255)); // フレームと同じサイズの白画像
+	Mat white_img;// = Mat(Size(640, 360), CV_8U, Scalar::all(255)); // フレームと同じサイズの白画像
 	Mat gray_img1, gray_img2; // 特徴点に利用するグレースケール画像
 	Mat mask2; // 膨張縮小処理後のマスク画像
 
@@ -84,10 +82,18 @@ int main(int argc, char** argv) {
 	Mat objectDescriptors, imageDescriptors;
 
 	//　特徴点に関する変数
+
 	string algorithm_type("SIFT"); // 特徴点抽出および特徴量記述のアルゴリズム名
 	Ptr<Feature2D> feature; // 汎用特徴点抽出および特徴量記述クラスへのポインタ
 	int hessian; // SURF特徴検出の際に用いるしきい値（小さいほど特徴点が検出されやすい）
 
+	//PyramidAdaptedFeatureDetector g_feature_detector(new SiftFeatureDetector,5);
+	GridAdaptedFeatureDetector g_feature_detector(new SiftFeatureDetector,1000000,2,2);
+
+
+	if(g_feature_detector.empty()){
+		cout << "faild init g_feature_detector." << endl;
+	}
 	//int skip; 				// 合成開始フレーム番号
 	//long end; 				// 合成終了フレーム番号
 	//long frame_num; 		// 現在のフレーム位置
@@ -275,10 +281,10 @@ int main(int argc, char** argv) {
 		feature->set("upright", 0);
 	}else if(algorithm_type.compare("SIFT") == 0){
 		//feature->set("nfeatures", 0);
-		feature->set("nOctaveLayers", 10);
-		feature->set("contrastThreshold", 0.02);
-		feature->set("edgeThreshold", 20);
-		feature->set("sigma", 2.0);
+		//feature->set("nOctaveLayers", 10);
+		//feature->set("contrastThreshold", 0.02);
+		//feature->set("edgeThreshold", 20);
+		//feature->set("sigma", 2.0);
 	}
 
 	/*
@@ -353,6 +359,7 @@ int main(int argc, char** argv) {
 	if (!f_target_video) {
 		// 画像フレームを指定
 		target_frame = imread(target_frame_path, CV_LOAD_IMAGE_COLOR);
+		//resize(target_frame,target_frame,Size(target_frame.cols/2.0,target_frame.rows/2.0));
 		cout << target_frame_path << endl;
 		if (target_frame.empty()) {
 			cerr << "cannnot load target frame : " << target_frame_path << endl;
@@ -361,9 +368,10 @@ int main(int argc, char** argv) {
 	} else {
 		// cam_dataファイルから動画を開いてフレームを取得
 		target_cap.open(str_target_video);
-		//target_cap.set(CV_CAP_PROP_POS_FRAMES, target_frame_num);
-		for (int i = 0; i < target_frame_num + 1; i++)
+		target_cap.set(CV_CAP_PROP_POS_FRAMES, target_frame_num);
 			target_cap >> target_frame;
+		//for (int i = 0; i < target_frame_num + 1; i++)
+		//	target_cap >> target_frame;
 		target_frame_time = target_cap.get(CV_CAP_PROP_POS_MSEC) / 1000.0;
 		if (target_frame.empty()) {
 			cerr << "cannnot load target frame from video : " << endl;
@@ -375,6 +383,7 @@ int main(int argc, char** argv) {
 		cout << "target frame : " << target_frame_num << "[frame]" << "time : "
 				<< target_frame_time << "[sec]" << endl;
 	}
+	//resize(target_frame,target_frame,Size(target_frame.cols/2.0,target_frame.rows/2.0));
 	cout << "done" << endl;
 
 	// 合成対象のフレームのチャネルごとのヒストグラムを計算
@@ -504,14 +513,28 @@ int main(int argc, char** argv) {
 	cout << "calc features" << endl;
 	dist_src = target_frame.clone();
 	//undistort(dist_src,target_frame,A1Matrix,dist);
+
+	Mat half_target_frame; // 高速化のために1/2解像度で特徴点検出
+
+	//resize(target_frame,target_frame,Size(target_frame.cols/2.0,target_frame.rows/2.0));
+
 	cvtColor(target_frame, gray_img1, CV_RGB2GRAY);
+	//cvtColor(half_target_frame, gray_img1, CV_RGB2GRAY);
 	//cvtColor(panorama, gray_img2, CV_RGB2GRAY);
 	//erode(mask, mask2, cv::Mat(), cv::Point(-1, -1), 50);
 
-	feature->operator ()(gray_img1, Mat(), objectKeypoints, objectDescriptors);
+	//feature.detect(gray_img1, Mat(), objectKeypoints, objectDescriptors);
+
+	Mat feature_mask = Mat::zeros(gray_img1.size(),CV_8U);
+/*	for(int i = 0; i < feature_mask.cols;i++)
+		for(int j = 0; j < feature_mask.rows;j++)
+			if(j > 150)
+				feature_mask.at<uchar>(j,i) = 255;
+				*/
+	g_feature_detector.detect(gray_img1,objectKeypoints);
+	feature->operator ()(gray_img1, Mat(), objectKeypoints, objectDescriptors,true);
 
 	//feature->operator ()(gray_img2, mask2, imageKeypoints, imageDescriptors);
-
 	//良い対応点の組みを求める
 	//good_matcher(objectDescriptors, imageDescriptors, &objectKeypoints,
 	//		&imageKeypoints, &matches, &pt1, &pt2);
@@ -597,6 +620,7 @@ int main(int argc, char** argv) {
 
 		cout << " pano_sd yaw : " << pano_sd.alpha << " pitch : "
 				<< pano_sd.beta << " roll : " << pano_sd.gamma << endl;
+		cout << pano_frame_time - s_time << "[msec]"<<endl;
 
 		SetYawRotationMatrix(&yawMatrix, pano_sd.alpha);
 		SetPitchRotationMatrix(&pitchMatrix, pano_sd.beta);
@@ -663,7 +687,7 @@ int main(int argc, char** argv) {
 
 	}
 	//free(sensor);
-
+	//detect_frame_num = 270;
 	cout << "detected near frame : " << detect_frame_num << endl;
 	//cout << max << endl;
 
@@ -779,10 +803,25 @@ int main(int argc, char** argv) {
 	 }
 	 */
 	// 視線方向が近いフレーム画像から特徴点を抽出しマッチング
-	dist_src = near_frame.clone();
+	//dist_src = near_frame.clone();
 	//undistort(dist_src,near_frame,A1Matrix,dist);
+
+	Mat half_near_frame; // 高速化のために1/2解像度で特徴点検出
+
+	//resize(near_frame,half_near_frame,Size(near_frame.cols/2.0,near_frame.rows/2.0));
+	//resize(near_frame,near_frame,Size(near_frame.cols/2.0,near_frame.rows/2.0));
+	//1/2解像度のグレースケース画像を生成
 	cvtColor(near_frame, gray_img2, CV_RGB2GRAY);
-	feature->operator ()(gray_img2, Mat(), imageKeypoints, imageDescriptors);
+	//cvtColor(half_near_frame, gray_img2, CV_RGB2GRAY);
+/*
+	feature_mask = Mat::zeros(near_frame.size(),CV_8U);
+	for(int i = 0; i < feature_mask.cols;i++)
+		for(int j = 0; j < feature_mask.rows;j++)
+			if(i > 550 && i < 800 && j > 300 && j < 450)
+				feature_mask.at<uchar>(j,i) = 255;
+*/
+	g_feature_detector.detect(gray_img2,imageKeypoints);
+	feature->operator ()(gray_img2, Mat(), imageKeypoints, imageDescriptors,true);
 
 	good_matcher(objectDescriptors, imageDescriptors, &objectKeypoints,
 			&imageKeypoints, &matches, &pt1, &pt2);
@@ -837,21 +876,38 @@ int main(int argc, char** argv) {
 	//waitKey(0);
 
 	// ホモグラフィ行列を計算し射影変換する
-	homography = findHomography(Mat(pt1), Mat(pt2), CV_RANSAC, 5.0);
+	vector<uchar> state;
+	homography = findHomography(Mat(pt1), Mat(pt2), state,CV_RANSAC, 10.0);
 
+	//cout << state << endl;
 	// matche test image
+
+	std::vector<cv::DMatch> adopt;
+	for(int i = 0; i < matches.size();i++)
+		if(state[i] == 1)
+			adopt.push_back(matches[i]);
+
+
+
+	drawMatches(target_frame, objectKeypoints, near_frame, imageKeypoints,
+			adopt, result);
+
+	imwrite("adopt_matches.jpg",result);
+
+
+
 	A2Matrix = A1Matrix.clone();
 	A2Matrix.at<double> (0, 0) = A1Matrix.at<double> (0, 0);
 	A2Matrix.at<double> (1, 1) = A1Matrix.at<double> (1, 1);
 	A2Matrix.at<double> (0, 2) = PANO_W / 2;
 	A2Matrix.at<double> (1, 2) = PANO_H / 2;
-	cout << "aa" << endl;
+
 	Mat result_matche = cv::Mat::zeros(Size(PANO_W, PANO_H), CV_8UC3);
 	//warpPerspective(near_frame, result_matche, A2Matrix*A1Matrix.inv(), Size(PANO_W, PANO_H),
 	//		CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
 
 	imwrite("near_matche.jpg", result_matche);
-	warpPerspective(target_frame, transform_image, homography, Size(PANO_W,
+	/*warpPerspective(target_frame, transform_image, homography, Size(PANO_W,
 			PANO_H), CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
 	warpPerspective(white_img, pano_black,  A2Matrix*A1Matrix.inv()*homography, Size(
 			PANO_W, PANO_H), CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
@@ -861,7 +917,7 @@ int main(int argc, char** argv) {
 
 	imwrite("near_matche2.jpg", result_matche);
 	//end
-
+*/
 
 	warpPerspective(white_img, pano_black, h_base * homography, Size(PANO_W,
 			PANO_H), CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
@@ -945,6 +1001,11 @@ int main(int argc, char** argv) {
 	gettimeofday(&t1,NULL);
 
 	ofstream ofs("processing_time.txt");
+	if (algorithm_type.compare("SURF") == 0)
+			ofs << "<algo>" << "\n" << "SURF" << endl;
+	else if(algorithm_type.compare("SIFT") == 0)
+			ofs << "<algo>" << "\n" << "SIFT" << endl;
+
 	ofs << local->tm_year + 1900 << "/" << local->tm_mon + 1 << "/" <<  local->tm_mday
 		 <<	" " << local->tm_hour << ":" << local->tm_min << ":" << local->tm_sec << " "
 		 <<  local->tm_isdst << endl;
@@ -954,6 +1015,6 @@ int main(int argc, char** argv) {
 		ofs << "<processing_time>" << "\n" << t1.tv_sec-t0.tv_sec - 1.0<< "." << 1000000 + t1.tv_usec-t0.tv_usec << "[sec]" << endl;
 	else
 		ofs << "<processing_time>" << "\n" << t1.tv_sec-t0.tv_sec << "." <<  t1.tv_usec-t0.tv_usec << "[sec]" << endl;
-
+	cout << "finished" << endl;
 	return 0;
 }
