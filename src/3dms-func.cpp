@@ -307,23 +307,17 @@ void make_pano(Mat src, Mat dst, Mat mask, Mat roi) {
 		int w = src.cols;
 		for (int i = 0; i < w; i++) {
 			for (int j = 0; j < h; j++) {
-				if (mask.at<unsigned char>(j, i) == 255
-						&& roi.at<unsigned char>(j, i) == 255) {
-					Vec3f a = dst.at<Vec3b>(j, i);
-					Vec3f b = src.at<Vec3b>(j, i);
-					dst.at<Vec3b>(j, i) = (a * pano_count.at<float>(j, i) + b)
-							/ (pano_count.at<float>(j, i) + 1.0);
-				}
-				if (mask.at<unsigned char>(j, i) == 0) {
+				if (roi.at<unsigned char>(j, i) == 255) {
 					dst.at<Vec3b>(j, i) = src.at<Vec3b>(j, i);
-					if (roi.at<unsigned char>(j, i) == 255)
-						mask.at<unsigned char>(j, i) = roi.at<unsigned char>(j,
-								i);
+					if (roi.at<unsigned char>(j, i) == 255){
+						mask.at<unsigned char>(j, i) = roi.at<unsigned char>(j,i);
+					}
 				}
-				pano_count.at<float>(j, i)++;}
+				pano_count.at<float>(j, i)++;
 			}
 		}
 	}
+}
 
 	/* より良い対応点を選択する
 	 *

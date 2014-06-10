@@ -2,7 +2,7 @@
 // 3dms-func.h
 //
 
-#define MAXDATA_3DMS  5000
+#define MAXDATA_3DMS  60000
 using namespace cv;
 typedef struct{
     double alpha, beta, gamma, north;
