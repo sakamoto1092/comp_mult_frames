@@ -10,20 +10,29 @@
  *  ・パノラマ背景を生成した際に得られるマスク画像
  *  が必要
  */
-#include<opencv.hpp>
-#include<nonfree/nonfree.hpp>
+#include <opencv2/opencv.hpp>
+#include <opencv2/stitching/stitcher.hpp>
+#include <opencv2/nonfree/nonfree.hpp>
+#include <opencv2/stitching/detail/blenders.hpp>
+
+#include<AKAZE.h>
+
+#include <boost/program_options.hpp>
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/time.h>
+
 #include <sstream>
 #include <string>
 #include <iostream>
-#include<iomanip>
+#include <iomanip>
 #include <vector>
 #include <fstream>
-#include<map>
-#include <boost/program_options.hpp>
-#include <sys/time.h>
+#include <map>
+
 #include "3dms-func.h"
 
 // パノラマ画像の大きさ
@@ -43,7 +52,6 @@ using boost::program_options::parse_command_line;
 using boost::program_options::notify;
 
 int main(int argc, char** argv) {
-
 	//ここからフレーム合成プログラム
 
 	VideoCapture target_cap; // target frame movie
@@ -53,6 +61,7 @@ int main(int argc, char** argv) {
 
 	Mat panorama, target_frame, near_frame; // パノラマ画像，合成対象フレーム画像，近傍背景画像
 	Mat homography; // ホモグラフィ行列
+	Mat senserbased_homographty;
 	Mat dist_src;
 	ifstream ifs_target_cam; // target_camファイルストリーム
 	ifstream ifs_pano_cam; // pano_cam　ファイルストリーム
@@ -96,6 +105,7 @@ int main(int argc, char** argv) {
 	if (g_feature_detector.empty()) {
 		cout << "faild init g_feature_detector." << endl;
 	}
+
 	//int skip; 				// 合成開始フレーム番号
 	//long end; 				// 合成終了フレーム番号
 	//long frame_num; 		// 現在のフレーム位置
@@ -117,25 +127,26 @@ int main(int argc, char** argv) {
 	bool f_target_video = false; // はめ込み対象が動画ファイル（or １枚のフレーム画像）
 	int f_adj_color = 0; // 色調補正の有無(0:補正なし 1:背景を補正 2:フレームを補正 3:見本画像に両方合わせる)
 
-	//float fps = 20; 			// 書き出しビデオのfps
-	//string n_video; 			// 書き出しビデオファイル名
-	string cam_data_path; // パノラマ背景cam_dataセンサファイル名
-	string target_cam_path; // はめ込み対象cam_dataファイル名
-	//string n_center; 			// センターサークル画像名
-	string cam_param_path; // 内部パラメータのxmlファイル名
-	string save_path; // 各ファイルの保存先ディレクトリ名
-	string target_frame_path; // 合成対象フレームのファイル名
-	string example_path; // 色調補正の目標画像（ここで指定された画像のヒストグラムにあわせて両方に補正をかける）
-	string result_name; // 処理結果画像ファイルの名前
+	//float fps = 20; 				// 書き出しビデオのfps
+	//string n_video; 				// 書き出しビデオファイル名
+	string cam_data_path; 			// パノラマ背景cam_dataセンサファイル名
+	string target_cam_path; 			// はめ込み対象cam_dataファイル名
+	//string n_center; 				// センターサークル画像名
+	string pano_cam_param_path; 	// パノラマ背景合成に使った映像の内部パラメータファイル名
+	string target_cam_param_path;	// はめ込む映像の内部パラメータファイル名
+	string save_path; 				// 各ファイルの保存先ディレクトリ名
+	string target_frame_path; 		// 合成対象フレームのファイル名
+	string example_path; 		// 色調補正の目標画像（ここで指定された画像のヒストグラムにあわせて両方に補正をかける）
+	string result_name; 				// 処理結果画像ファイルの名前
 
-	time_t timer;          // 日付取得用
-	struct tm *local;       // 日付取得用
+	time_t timer;        // 日付取得用
+	struct tm *local;    // 日付取得用
 
 	struct timeval t0, t1; // 処理時間計算用変数 t0:start t1:end
 
 	timer = time(NULL);			// 現在時間の取得
 	local = localtime(&timer);  // 地方時間に変換
-	gettimeofday(&t0, NULL); // 開始時刻の取得
+	gettimeofday(&t0, NULL); 	// 開始時刻の取得
 
 	Mat h_base;
 	Mat tmp_base;
@@ -153,7 +164,7 @@ int main(int argc, char** argv) {
 	Mat a_tmp;
 	Mat dist;
 
-	list<int> near_senser_list; // はめ込み対象に視線方向が近いフレーム番号とそのセンサ情報を格納する
+	list<pair<int, SENSOR_DATA> > near_senser_list; // はめ込み対象に視線方向が近いフレーム番号とそのセンサ情報を格納する
 
 	try {
 		// コマンドラインオプションの定義
@@ -174,10 +185,12 @@ int main(int argc, char** argv) {
 				value<bool>()->default_value(false), "直線検出の利用")("undist",
 				value<bool>()->default_value(false), "画像のレンズ歪み補正")("outdir",
 				value<string>()->default_value("./"), "各種ファイルの出力先ディレクトリの指定")(
-				"cam_param", value<string>(), "内部パラメータ(.xml)ファイル名の指定")(
-				"adj_color", value<string>(), "パノラマ背景またははめ込み対象フレーム画像の色味を合わせる")(
-				"out,o", value<string>()->default_value("target.jpg"),
-				"処理結果画像ファイルの名前")("help,h", "ヘルプの出力");
+				"pano_cam_param", value<string>(),
+				"パノラマ背景合成に使った映像の内部パラメータファイル(.xml)の指定")("target_cam_param",
+				value<string>(), "はめ込む映像の内部パラメータのファイル(.xml)の指定")("adj_color",
+				value<string>(), "パノラマ背景またははめ込み対象フレーム画像の色味を合わせる")("out,o",
+				value<string>()->default_value("target.jpg"), "処理結果画像ファイルの名前")(
+				"help,h", "ヘルプの出力");
 
 		// オプションのマップを作成
 		variables_map vm;
@@ -195,11 +208,19 @@ int main(int argc, char** argv) {
 			cerr << "cam_dataファイル名は必ず指定して下さい" << endl;
 			return -1;
 		}
-		// 内部パラメータファイル名の入力の確認
-		if (vm.count("cam_param")) {
-			cam_param_path = vm["cam_param"].as<string>();
+		//パノラマ背景映像の 内部パラメータファイル名の入力の確認
+		if (vm.count("pano_cam_param")) {
+			pano_cam_param_path = vm["pano_cam_param"].as<string>();
 		} else {
-			cerr << "内部パラメータファイル名を指定して下さい．" << endl;
+			cerr << "パノラマ背景合成時の内部パラメータファイル名を指定して下さい．" << endl;
+			return -1;
+		}
+
+		// はめ込む映像の内部パラメータファイル名の入力の確認
+		if (vm.count("target_cam_param")) {
+			target_cam_param_path = vm["target_cam_param"].as<string>();
+		} else {
+			cerr << "はめ込む映像の内部パラメータファイル名を指定して下さい．" << endl;
 			return -1;
 		}
 
@@ -211,7 +232,7 @@ int main(int argc, char** argv) {
 		}
 
 		// レンズ歪みを修正するための，歪み系数を含む内部パラメータファイルの確認
-		if (vm.count("undist") && !vm.count("cam_param")) {
+		if (vm.count("undist") && !vm.count("target_cam_param")) {
 			cerr << "歪み補正をかけるには内部パラメータファイル名を指定して下さい．" << endl;
 			return -1;
 		}
@@ -333,10 +354,13 @@ int main(int argc, char** argv) {
 		ifs_target_cam >> str_target_video;
 		ifs_target_cam >> str_target_time;
 		ifs_target_cam >> str_target_ori;
-		//		ifs_target_cam >> target_frame_num;
+//		ifs_target_cam >> target_frame_num;
 	}
-	FileStorage cvfs_inparam(cam_param_path, CV_STORAGE_READ);
+
+	// 内部パラメータファイル読み込み用変数
+	FileStorage cvfs_inparam(pano_cam_param_path, CV_STORAGE_READ);
 	FileNode node_inparam(cvfs_inparam.fs, NULL);
+
 	/*
 	 // パノラマ画像の合成に使われたセンサ情報の読み込み
 	 FileNodeIterator log_it = node.begin();
@@ -408,8 +432,10 @@ int main(int argc, char** argv) {
 		target_cap.open(str_target_video);
 		//target_cap.set(CV_CAP_PROP_POS_FRAMES, target_frame_num);
 		//	target_cap >> target_frame;
-		for (int i = 0; i < target_frame_num; i++)
-			target_cap >> target_frame;
+		for (int i = 0; i < target_frame_num - 1; i++)
+			target_cap.grab();
+		target_cap >> target_frame;
+
 		target_frame_time = target_cap.get(CV_CAP_PROP_POS_MSEC) / 1000.0;
 		if (target_frame.empty()) {
 			cerr << "cannnot load target frame from video : " << endl;
@@ -423,7 +449,7 @@ int main(int argc, char** argv) {
 	}
 	//resize(target_frame,target_frame,Size(target_frame.cols/2.0,target_frame.rows/2.0));
 	cout << "done" << endl;
-
+	//target_frame = imread("2.jpg", CV_LOAD_IMAGE_COLOR);
 	// 合成対象のフレームのチャネルごとのヒストグラムを計算
 	if (f_adj_color != 0) {
 		// 色見補正のオプションが指定されていたら
@@ -445,9 +471,6 @@ int main(int argc, char** argv) {
 	//namedWindow("transform_image", 	CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
 	//namedWindow("result",			CV_WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
 	// read camera param
-	read(node_inparam["intrinsic"], a_tmp);
-	read(node_inparam["distortion"], dist);
-
 	// create white_img
 	white_img = Mat(target_frame.size(), CV_8U, Scalar::all(255));
 
@@ -462,7 +485,8 @@ int main(int argc, char** argv) {
 		cout << "save target frame from video to : " << ss.str() << endl;
 	}
 
-	Mat A1Matrix, A2Matrix;
+	Mat A1Matrix, A2Matrix;         // A1 : target_param (パノラマの元画像)
+										// A2 : object_param (はめ込む対象フレーム)
 	Mat yaw = Mat::eye(3, 3, CV_64FC1);
 	Mat roll = cv::Mat::eye(3, 3, CV_64FC1);
 	Mat pitch = cv::Mat::eye(3, 3, CV_64FC1);
@@ -470,15 +494,30 @@ int main(int argc, char** argv) {
 	Mat hh = Mat::eye(3, 3, CV_64FC1);
 	A1Matrix = Mat::eye(3, 3, CV_64FC1);
 
+	// 各内部パラメータの取得
+	read(node_inparam["intrinsic"], a_tmp);
+	read(node_inparam["distortion"], dist);
 	A1Matrix = a_tmp.clone();
 	//A1Matrix = a_tmp.clone();
+
+	cvfs_inparam.open(target_cam_param_path, CV_STORAGE_READ);
+	node_inparam = FileNode(cvfs_inparam.fs, NULL);
+
+	read(node_inparam["intrinsic"], a_tmp);
+	read(node_inparam["distortion"], dist);
+	A2Matrix = a_tmp.clone();
+
+	cout << "load test cam_param" << endl << endl;
+	cout << A1Matrix << endl;
+	cout << A2Matrix << endl;
+
 	cout << hh << endl;
 	transform_image2 = panorama.clone();
 	//imshow("panorama", transform_image2);
 	//waitKey(30);
 
 	// 合成したいフレームのORIからパノラマ平面へのホモグラフィを計算し重なり具合を計算
-	//string str_time(argv[6]);
+
 	string time_buf;
 	ifstream ifs_time(str_target_time.c_str());
 	double s_time;
@@ -496,7 +535,8 @@ int main(int argc, char** argv) {
 	s_time /= 1000.0;
 	cout << "s_time : " << s_time << endl;
 	printf("%f\n", s_time);
-	SENSOR_DATA *sensor = (SENSOR_DATA *) malloc(sizeof(SENSOR_DATA) * 60000);
+	SENSOR_DATA *sensor = (SENSOR_DATA *) malloc(
+			sizeof(SENSOR_DATA) * MAXDATA_3DMS);
 
 	cout << "load target sd..." << endl;
 	// 対象フレームのセンサデータを一括読み込み
@@ -524,7 +564,7 @@ int main(int argc, char** argv) {
 	ifs_time >> time_buf;
 	ifs_time >> s_time; // msec
 
-	s_time /= 1000.0;
+	s_time /= 1000.0;   //convert to sec
 	cout << "s_time : " << s_time << endl;
 	printf("%f\n", s_time);
 	// センサデータを一括読み込み
@@ -544,7 +584,7 @@ int main(int argc, char** argv) {
 	// パノラマ画像と合成したいフレームの特徴点抽出と記述
 	cout << "calc features" << endl;
 	dist_src = target_frame.clone();
-	//undistort(dist_src,target_frame,A1Matrix,dist);
+	//undistort(dist_src,target_frame,A1Matrix,dist);  //悪くなるんでやらない
 
 	Mat half_target_frame; // 高速化のために1/2解像度で特徴点検出
 
@@ -556,9 +596,23 @@ int main(int argc, char** argv) {
 	//erode(mask, mask2, cv::Mat(), cv::Point(-1, -1), 50);
 
 	//feature.detect(gray_img1, Mat(), objectKeypoints, objectDescriptors);
-
 	//g_feature_detector.detect(gray_img1,objectKeypoints);
-	feature->operator ()(gray_img1, Mat(), objectKeypoints, objectDescriptors);
+
+	AKAZEOptions akaze_op;
+	akaze_op.img_height = target_frame.rows;
+	akaze_op.img_width = target_frame.cols;
+	akaze_op.dthreshold = 0.0001f;
+	AKAZE akaze(akaze_op);
+	/*
+	 {
+	 Mat img32;
+	 gray_img1.convertTo(img32,CV_32F,1.0/255.0);
+	 akaze.Create_Nonlinear_Scale_Space(img32);
+	 akaze.Feature_Detection(objectKeypoints);
+	 akaze.Compute_Descriptors(objectKeypoints,objectDescriptors);
+	 }
+	 */
+	feature->operator ()(gray_img1, Mat(), objectKeypoints, objectDescriptors,false);
 
 	//feature->operator ()(gray_img2, mask2, imageKeypoints, imageDescriptors);
 	//良い対応点の組みを求める
@@ -584,23 +638,6 @@ int main(int argc, char** argv) {
 	//imshow("panoblack", pano_black);
 	//waitKey(20);
 
-	/*
-	 * はめこむ際の基準フレームの決定
-	 *
-	 * 今は案１
-	 *
-	 * 案１
-	 * パノラマ背景生成時の各フレームのホモグラフィー行列を取り出して
-	 * 白い画像をパノラマ平面に投影．パノラマ背景とはめ込むフレーム間の
-	 * ホモグラフィー行列を計算し，同じく白い画像をパノラマ平面に投影．
-	 * 投影した２つの画像で白い領域の重なり具合で基準フレームを決定
-	 *
-	 * 案２
-	 * パノラマ背景生成時の各フレームのセンサ情報と，はめ込むフレームの
-	 * センサ情報を比較　視線方向が近いフレームを基準フレームとする．
-	 *
-	 */
-
 	aria1 = Mat(Size(PANO_W, PANO_H), CV_8U, Scalar::all(0));
 	aria2 = Mat(Size(PANO_W, PANO_H), CV_8U, Scalar::all(0));
 
@@ -608,11 +645,11 @@ int main(int argc, char** argv) {
 	SetPitchRotationMatrix(&pitchMatrix, aim_sd.beta);
 	SetRollRotationMatrix(&rollMatrix, aim_sd.gamma);
 	Mat vec1(3, 1, CV_64F), vec2(3, 1, CV_64F);
-	;
+
 	vec1 = yawMatrix * pitchMatrix * rollMatrix
 			* (cv::Mat_<double>(3, 1) << 1, 0, 0);
+
 	while (1) {
-		//		frame_num = node["frame"];
 		n++;
 		ss << "homo_" << n;
 		read(node[ss.str()], tmp_base);
@@ -633,7 +670,7 @@ int main(int argc, char** argv) {
 
 		cout << " pano_sd yaw : " << pano_sd.alpha << " pitch : "
 				<< pano_sd.beta << " roll : " << pano_sd.gamma << endl;
-		cout << pano_frame_time - s_time << "[msec]" << endl;
+		cout << pano_frame_time - s_time << "[sec]" << endl;
 
 		SetYawRotationMatrix(&yawMatrix, pano_sd.alpha);
 		SetPitchRotationMatrix(&pitchMatrix, pano_sd.beta);
@@ -650,7 +687,7 @@ int main(int argc, char** argv) {
 		cout << "dist : " << distanse << endl;
 		//distanse = abs(pano_sd.alpha - aim_sd.alpha);
 		// 近いものがあったらnear_sdを更新
-		if (distanse < 10 && distanse < min) {
+		if (distanse < min || true) {
 			min = distanse;
 			//near_sd = pano_sds[i];
 			cout << "detect near frame : " << n << endl;
@@ -658,13 +695,14 @@ int main(int argc, char** argv) {
 			//near_frame = vec_n_pano_frames[i];
 			//near_homography = pano_monographys[i].clone();
 			detect_frame_num = n;
-			near_senser_list.push_front(n); // 良いものリストを作る
+			near_senser_list.push_front(make_pair((int) n, pano_sd)); // 良いものリストを作る(パノラマ元フレーム番号,パノラマセンサデータ)
 
 		}
 
 		//cout << n << " >= " << pano_cap.get(CV_CAP_PROP_FRAME_COUNT) << endl;
 
 		/*
+		 warpPerspective(white_img, aria1, homography, Size(PANO_W, PANO_H),
 		 warpPerspective(white_img, aria1, homography, Size(PANO_W, PANO_H),
 		 CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
 
@@ -701,85 +739,223 @@ int main(int argc, char** argv) {
 		 */
 		//tmp_base.release();
 	}
-	//free(sensor);
+	free(sensor);
 	//detect_frame_num = 143;
 
 	// 良いものリストの中から最良のもの（最もよくマッチングがとれたもの）
 	// を繰りかえし処理で見つける
-	int idx = 0;
+	int idx = 0;                   // 反復回数のカウンタ
+	std::vector<cv::DMatch> adopt; // 最良のマッチングがとれたペアでのマッチ
+	size_t max_adopt = 0;          // 正しい対応点の最大数
 	cout << "sizeof near_list : " << near_senser_list.size() << endl;
-	for (list<int>::iterator it = near_senser_list.begin();
-			it != near_senser_list.end(); it++, idx++) {
-		size_t max_adopt = 0;
+	for (list<pair<int, SENSOR_DATA> >::iterator it = near_senser_list.begin();
+			it != near_senser_list.end(); it++, ++idx) {
+
+		vector<uchar> state;
+		Mat current_near;
 		Mat calced_homography = homography.clone();
+		Mat current_discriptor;
+		vector<KeyPoint> current_keypoints;
+		vector<DMatch> current_adopt;
+
 		cout << "check#" << idx << endl;
-		cout << "num_of_frame : " << (*it);
+		cout << "num_of_frame : " << (*it).first << endl;
 
 		// 該当フレーム番号のホモグラフィ行列を取り出す
-		ss << "homo_" << *it;
+		ss << "homo_" << (*it).first;
 		read(node[ss.str()], tmp_base);
-		h_base = tmp_base.clone();
+
 		ss.clear();
 		ss.str("");
 
-		// 該当フレーム番号のフレーム画像を取得
+		// 該当フレーム番号のフレーム画像を取得(先頭に戻ってから当該フレームを取得)
+		// cap.get()でシークするとdupフレームが考慮されなくなる?
 		pano_cap.set(CV_CAP_PROP_POS_FRAMES, 0);
-		for (int i = 0; i < detect_frame_num; i++)
+		for (int i = 0; i < (*it).first-1; i++)
 			pano_cap.grab();
-		pano_cap >> near_frame;
+
+		pano_cap >> current_near;
 
 		// 近い背景フレーム画像を書き出し
-		ss << save_path << "near_frame_" << setw(4) << *it<<".jpg";
-		imwrite(ss.str(), near_frame);
+		ss << save_path << "near_frame_" << setw(4) << (*it).first << ".png";
+		imwrite(ss.str(), current_near);
 		ss.clear();
 		ss.str("");
 
-		cvtColor(near_frame, gray_img2, CV_RGB2GRAY);
-		//g_feature_detector.detect(gray_img2,imageKeypoints);
-		feature->operator ()(gray_img2, Mat(), imageKeypoints,
-				imageDescriptors);
+		cvtColor(current_near, gray_img2, CV_RGB2GRAY);
+		//g_feature_detector.detect(gray_img2,current_keypoints);
+		feature->operator ()(gray_img2, Mat(), current_keypoints,current_discriptor,false);
+		/*
+		 {
+		 Mat img32;
+		 gray_img2.convertTo(img32,CV_32F,1.0/255.0);
+		 akaze.Create_Nonlinear_Scale_Space(img32);
+		 akaze.Feature_Detection(current_keypoints);
+		 akaze.Compute_Descriptors(current_keypoints,current_discriptor);
+		 }
+		 */
+			good_matcher(objectDescriptors, current_discriptor, &objectKeypoints,
+					&current_keypoints, &matches, &pt1, &pt2);
+/*
+		//using detail::BestOf2NearestMatcher by Opencv (優秀)
+		vector<detail::ImageFeatures> features(2);
 
-		good_matcher(objectDescriptors, imageDescriptors, &objectKeypoints,
-				&imageKeypoints, &matches, &pt1, &pt2);
+		detail::ImageFeatures aa;
+		aa.descriptors = current_discriptor.clone();
+		aa.img_idx = 0;
+		aa.keypoints = current_keypoints;
+		features.push_back(aa);
 
-		// ホモグラフィ行列を計算し射影変換する
-		vector<uchar> state;
-		calced_homography = findHomography(Mat(pt1), Mat(pt2), state, CV_RANSAC,
-				10.0);
+		aa.descriptors = objectDescriptors.clone();
+		aa.img_idx = 1;
+		aa.img_size = current_near.size();
+		aa.keypoints = objectKeypoints;
+		features.push_back(aa);
 
-		//cout << state << endl;
-		// matche test image
+		vector<detail::MatchesInfo> pairwise_matches;
+		detail::BestOf2NearestMatcher matcher(false, 0.3f);
+		matcher(features, pairwise_matches);
+		matcher.collectGarbage();
+*/
+		/*
+		 // BestOf2NearestMatcherでの結果を一部のみ表示してみる
+		 vector<DMatch> submatch;
+		 int count = 0;
+		 for (auto a : pairwise_matches[14].matches) {
+		 if (count < 100)
+		 submatch.push_back(a);
+		 ++count;
+		 }
+		 drawMatches(target_frame, objectKeypoints, current_near,
+		 current_keypoints, submatch, result, Scalar::all(-1),
+		 Scalar::all(-1), vector<char>(), 2);
+		 //imshow("detail matcher", result);
+		 //waitKey(30);
+		 */
+		// detail::HomographyBasedEstimatorと
+		// detail::BundleAdjusterReprojを使った
+		// 回転行列の推定（求めることはできたが合っているかの検証はまだ）
+		/*
+		 detail::HomographyBasedEstimator estimator;
+		 vector<detail::CameraParams> cameras;
+		 estimator(features, pairwise_matches, cameras);
+
+
+		 for (auto var = cameras.begin(); var < cameras.end(); var++) {
+		 // BundleBundleAdjusterはCV_32Fを要求しているので変換
+		 Mat R;
+		 (*var).R.convertTo(R, CV_32F);
+		 (*var).R = R.clone();
+		 //cout << "test : " << (*var).R << endl;
+		 }
+
+		 Ptr<detail::BundleAdjusterBase> adjuster;
+		 adjuster = new detail::BundleAdjusterReproj();
+		 adjuster->setConfThresh(1.f);
+		 Mat_<uchar> refine_mask = Mat::zeros(3, 3, CV_8U);
+		 refine_mask(0, 0) = 1;
+		 refine_mask(0, 1) = 1;
+		 refine_mask(0, 2) = 1;
+		 refine_mask(1, 1) = 1;
+		 refine_mask(1, 2) = 1;
+		 adjuster->setRefinementMask(refine_mask);
+		 (*adjuster)(features, pairwise_matches, cameras);
+		 */
+		/*
+		 // これは不要のはず
+		 for (auto var : cameras) {
+		 Mat R;
+		 var.R.convertTo(R, CV_32F);
+		 var.R = R;
+		 cout << "test : " << var.R << endl;
+		 }
+		 */
+		//features.clear();
+/*
+		// detail::BestOf2NearestMatcherでのマッチング結果を
+		// 使ってホモグラフィ行列を計算してみるために，対応点の座標を取り出す
+		// 14というindexはどうにか計算できるみたいだが今は勘
+		vector<Point2f> p1, p2;
+		p1.clear();
+		p2.clear();
+		for (auto a : pairwise_matches[14].matches) {
+			p1.push_back(objectKeypoints[a.queryIdx].pt);
+			p2.push_back(current_keypoints[a.trainIdx].pt);
+
+		}
+
+		calced_homography = findHomography(Mat(p1), Mat(p2), state, CV_RANSAC,1.5);
+		cout << calced_homography << endl;
+*/
+		calced_homography = findHomography(Mat(pt1), Mat(pt2),state, CV_RANSAC);
+		cout << calced_homography << endl;
+/*
+		 //using stitcher by opencv
+		 // これを使うと何も考えずに2枚の画像を貼り合わせられる
+		 // ただ，視線方向やパノラマのサイズ，blendの設定等があまりいじれないため
+		 // 現状ではこのプログラムには組み込めない
+		 // 正しく合成できるか否かの確認用
+		 Mat pano;
+		 vector<Mat> imgs;
+		 imgs.push_back(current_near);
+		 imgs.push_back(target_frame);
+
+		 Stitcher stitcher = Stitcher::createDefault(false);
+		 stitcher.setWarper(new cv::PlaneWarper());
+		 stitcher.setBlender(
+		 detail::Blender::createDefault(detail::Blender::NO, false));
+
+		 Stitcher::Status status = stitcher.stitch(imgs, pano);
+
+		 imshow("stitch test", pano);
+		 waitKey(0);
+
+*/
 
 		// マッチングの結果を画像で保存
-		std::vector<cv::DMatch> adopt;
-		for (int i = 0; i < matches.size(); i++)
-			if (state[i] == 1)
-				adopt.push_back(matches[i]);
+		current_adopt.clear();
+		for (size_t i = 0; i < matches.size(); i++)
+			if (state[i] == 1) {
+				current_adopt.push_back(matches[i]);
+			}
 
-		drawMatches(target_frame, objectKeypoints, near_frame, imageKeypoints,
-				adopt, result);
-		ss << save_path << "adopt_matches_" << setw(4) << *it << ".jpg";
+		drawMatches(target_frame, objectKeypoints, current_near,
+				current_keypoints, current_adopt, result, Scalar::all(-1),
+				Scalar::all(-1), vector<char>());
+
+
+		ss << "#" << idx << " adopted size :" << current_adopt.size();
+		putText(result, ss.str(), cv::Point(50, 50), FONT_HERSHEY_SIMPLEX, 1.2,
+				cv::Scalar(0, 0, 200), 2, CV_AA);
+		ss.clear();
+		ss.str("");
+
+		ss << save_path << "adopt_matches_" << setw(4) << (*it).first << ".jpg";
 		imwrite(ss.str(), result);
 		ss.clear();
 		ss.str("");
 
-		cout << "det : " << determinant(h_base * calced_homography - h_base)<< endl;
-		cout << "det : " << determinant(calced_homography) - 1.0 << endl;
-
-		cout << "adopted size :" << adopt.size() << endl;
-
+		//cout << "det : " << determinant(tmp_base * calced_homography - tmp_base) << endl;
+		//cout << "det : " << determinant(calced_homography) - 1.0 << endl;
+		cout << "adopted size :" << current_adopt.size() << endl;
+		//cout << "adopted size :" << adopted_size << endl;
 		// 行列式が大きく変わらず，なおかつ対応点が最大であるペアを採用する
-		if (determinant(h_base * calced_homography - h_base) - 1.0 < 100 && adopt.size() > max) {
+		if (current_adopt.size() > max_adopt) {
 
 			// 現状で最良のホモグラフィ行列を記録
-			cout << "find better pair"<<endl;
-			max_adopt = adopt.size();
-			homography = calced_homography.clone();
+			cout << "find better pair" << endl;
+			adopt = current_adopt;                   // 最良のペアとして更新
+			max_adopt = adopt.size();				   // 正しい対応点の最大数
+			homography = calced_homography.clone();  // ホモグラフィ行列を更新
+			near_frame = current_near.clone();       // 背景画像を更新
+			h_base = tmp_base.clone();               // 背景投影に使われたホモグラフィ行列の更新
+			detect_frame_num = (*it).first;			  // 背景フレームのフレーム番号
 		}
-
 	}
 
 	cout << "detected near frame : " << detect_frame_num << endl;
+	imwrite("best_near.png", near_frame);
+	cout << "h_base" << endl << h_base << endl;
 	/*
 	 //detect_frame_num = 101;
 	 ss << "homo_" << detect_frame_num;
@@ -975,6 +1151,106 @@ int main(int argc, char** argv) {
 	 imwrite("adopt_matches.jpg", result);
 
 	 */
+	/*
+	 list<pair<int, SENSOR_DATA> >::iterator it = near_senser_list.begin();
+	 aim_sd = (*++it).second;
+
+	 SetYawRotationMatrix(&yawMatrix, (pano_sd.alpha - aim_sd.alpha));
+	 SetPitchRotationMatrix(&pitchMatrix, (pano_sd.beta - aim_sd.beta));
+	 SetRollRotationMatrix(&rollMatrix, (pano_sd.gamma - aim_sd.gamma));
+	 senserbased_homographty = homography.clone();
+	 senserbased_homographty = A1Matrix * rollMatrix * pitchMatrix * yawMatrix
+	 * A1Matrix.inv();
+	 */
+	if (h_base.empty() || homography.empty())
+		cerr << "h_base or homography is empty" << endl;
+	/*
+	 vector<KeyPoint> masked_vec1, masked_vec2;
+	 Mat masked_mat1 = Mat(objectDescriptors.rows - adopt.size(),
+	 objectDescriptors.cols, objectDescriptors.type());
+	 Mat masked_mat2 = Mat(imageDescriptors.rows - adopt.size(),
+	 imageDescriptors.cols, imageDescriptors.type());
+
+	 int c1 = 0;
+	 int c2 = 0;
+	 bool flag = false;
+	 // 先のペアで採用されてたマッチングを除いたキーポイントを作る
+	 for (int i = 0; i < objectDescriptors.rows; i++) {
+	 flag = false;
+	 for (int j = 0; j < adopt.size(); j++) {
+	 if (adopt[j].queryIdx == i) {
+	 flag = true;
+	 }
+	 }
+	 if (!flag) {
+	 masked_vec1.push_back(objectKeypoints[i]);
+	 objectDescriptors.row(i).copyTo(masked_mat1.row(c1));
+	 ++c1;
+	 }
+
+	 }
+
+	 for (int i = 0; i < imageDescriptors.rows; i++) {
+	 flag = false;
+	 for (int j = 0; j < adopt.size(); j++) {
+	 if (adopt[j].trainIdx == i) {
+	 flag = true;
+	 }
+	 }
+	 if (!flag) {
+	 masked_vec2.push_back(imageKeypoints[i]);
+	 imageDescriptors.row(i).copyTo(masked_mat2.row(c2));
+	 ++c2;
+	 }
+
+	 }
+	 cout << "test" << endl;
+	 cout << masked_vec1.size() << endl;
+	 cout << "rows cols : " << masked_mat1.rows << " " << masked_mat1.cols
+	 << endl;
+
+	 cout << masked_vec2.size() << endl;
+	 cout << "rows cols : " << masked_mat2.rows << " " << masked_mat2.cols
+	 << endl;
+
+	 vector<DMatch> re_matches;
+	 vector<Point2f> re_pt1, re_pt2;
+	 good_matcher(masked_mat1, masked_mat2, &masked_vec1, &masked_vec2,
+	 &re_matches, &re_pt1, &re_pt2);
+
+	 //	vector<Point2f> re_pt1,re_pt2;
+	 // for (int i = 0; i < re_matches.size(); i++) {
+	 // re_pt1.push_back(masked_vec1[re_matches[i].queryIdx].pt);
+	 // re_pt2.push_back(masked_vec2[re_matches[i].trainIdx].pt);
+	 // }
+
+	 drawMatches(target_frame, masked_vec1, near_frame, masked_vec2, re_matches,
+	 result);
+
+	 vector<uchar> re_state;
+	 Mat re_homography = findHomography(Mat(re_pt1), Mat(re_pt2), re_state,
+	 CV_RANSAC, 10.0);
+
+
+
+	 imshow("remutch_test", result);
+	 waitKey();
+	 imwrite("remutch_test.jpg", result);
+
+
+	 vector<DMatch> re_adopt;
+	 for (int i = 0; i < re_matches.size(); i++)
+	 if (re_state[i] == 1)
+	 re_adopt.push_back(re_matches[i]);
+
+	 drawMatches(target_frame, masked_vec1, near_frame, masked_vec2,re_adopt, result);
+
+
+
+	 imshow("readopt_test", result);
+	 waitKey();
+	 imwrite("readopt_test.jpg", result);
+	 */
 
 	warpPerspective(white_img, pano_black, h_base * homography,
 			Size(PANO_W, PANO_H), CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
@@ -1013,7 +1289,7 @@ int main(int argc, char** argv) {
 	bitwise_and(mask, pano_black, mask2);
 
 	//imshow("panoblack", pano_black);
-	waitKey(30);
+	//waitKey(30);
 	make_pano(transform_image, transform_image2, mask, pano_black);
 	ss.str("");
 	ss.clear();
@@ -1023,21 +1299,23 @@ int main(int argc, char** argv) {
 	// TODO :回転の微調整をする
 	/*
 	 int count = 0;
-	 //	for (double alpha = -2.0; alpha < 2; alpha += 0.5) {
-	 //		for (double beta = -2.0; beta < 2; beta += 0.5) {
-	 //			for (double gamma = -2.0; gamma < 2; gamma += 0.5) {
-	 //SetYawRotationMatrix(&yawMatrix, alpha);
-	 //SetPitchRotationMatrix(&pitchMatrix, beta);
-	 //SetRollRotationMatrix(&rollMatrix, gamma);
-	 SetYawRotationMatrix(&yawMatrix, 0);
-	 SetPitchRotationMatrix(&pitchMatrix, 0);
-	 SetRollRotationMatrix(&rollMatrix, 0);
-	 Mat adj_tmp = h_base * homography * A1Matrix * rollMatrix * pitchMatrix
-	 * yawMatrix * A1Matrix.inv();
-	 warpPerspective(white_img, pano_black, adj_tmp, Size(PANO_W, PANO_H),
+	 for (double alpha = -2.0; alpha < 2; alpha += 0.5) {
+	 for (double beta = -2.0; beta < 2; beta += 0.5) {
+	 for (double gamma = -2.0; gamma < 2; gamma += 0.5) {
+	 SetYawRotationMatrix(&yawMatrix, alpha);
+	 SetPitchRotationMatrix(&pitchMatrix, beta);
+	 SetRollRotationMatrix(&rollMatrix, gamma);
+	 //SetYawRotationMatrix(&yawMatrix, 0);
+	 //SetPitchRotationMatrix(&pitchMatrix, 0);
+	 //SetRollRotationMatrix(&rollMatrix, 0);
+	 Mat adj_tmp = h_base * homography * A1Matrix * rollMatrix
+	 * pitchMatrix * yawMatrix * A1Matrix.inv();
+	 warpPerspective(white_img, pano_black, adj_tmp,
+	 Size(PANO_W, PANO_H),
 	 CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
 	 warpPerspective(target_frame, transform_image, adj_tmp,
-	 Size(PANO_W, PANO_H), CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
+	 Size(PANO_W, PANO_H),
+	 CV_INTER_LINEAR | CV_WARP_FILL_OUTLIERS);
 	 bitwise_and(mask, pano_black, mask2);
 	 tmp_result = panorama.clone();
 	 make_pano(transform_image, tmp_result, ~mask2, pano_black);
@@ -1047,12 +1325,12 @@ int main(int argc, char** argv) {
 	 imwrite(ss.str(), tmp_result);
 
 	 count++;
-	 //			}
-	 //		}
-	 //	}
+	 }
+	 }
+	 }
 	 */
 	//imshow("result", transform_image2);
-	//waitKey(30);
+	//waitKey(0);
 	gettimeofday(&t1, NULL);
 
 	ofstream ofs("processing_time.txt");

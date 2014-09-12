@@ -3,6 +3,7 @@
 //
 
 #define MAXDATA_3DMS  60000
+
 using namespace cv;
 typedef struct{
     double alpha, beta, gamma, north;
@@ -13,6 +14,10 @@ typedef struct{
     //double HH,MM,SS;
     double TT;
 }SENSOR_DATA;
+
+// CROSS     : クロスマッチング（1->2 & 2->1）
+// KNN2_DIST : KNNでの2点で距離が離れているものを採用
+enum{CROSS, KNN2_DIST};
 
 // ���ĤΥ��󥵥ǡ�����ɽ�������ߤϻ���Ȧ�, ��, ��, ��-north ��ɽ��
 int DispSensorData(SENSOR_DATA sd);

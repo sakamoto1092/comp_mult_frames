@@ -4,14 +4,14 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include<opencv.hpp>
+#include<opencv2/opencv.hpp>
 #include "3dms-func.h"
 #include<iostream>
 using namespace cv;
 using namespace std;
 #define PANO_W 6000
 #define PANO_H 3000
-cv::Mat pano_count = Mat(Size(PANO_W, PANO_H), CV_32S, Scalar::all(1));
+cv::Mat pano_count = Mat(Size(PANO_W, PANO_H), CV_32S, Scalar::all(0));
 // ���ĤΥ��󥵥ǡ�����ɽ�������ߤϻ���Ȧ�, ��, ��, ��-north ��ɽ��
 int DispSensorData(SENSOR_DATA sd) {
 	fprintf(stderr, "%f %f %f %f ", sd.alpha, sd.beta, sd.gamma, sd.north);
@@ -300,44 +300,56 @@ void get_histimage(Mat image, Mat *hist_image) {
  */
 
 void make_pano(Mat src, Mat dst, Mat mask, Mat roi) {
-
+	Vec3f a, b;
 	//サイズの一致を確認
 	if (src.cols == dst.cols && src.rows == dst.rows) {
 		int h = src.rows;
 		int w = src.cols;
 		for (int i = 0; i < w; i++) {
 			for (int j = 0; j < h; j++) {
-				if (roi.at<unsigned char>(j, i) == 255) {
-					dst.at<Vec3b>(j, i) = src.at<Vec3b>(j, i);
-					if (roi.at<unsigned char>(j, i) == 255){
-						mask.at<unsigned char>(j, i) = roi.at<unsigned char>(j,i);
-					}
+				if (mask.at<unsigned char>(j, i) == 255
+						&& roi.at<unsigned char>(j, i) == 255) {
+					// 書き込みたい画素位置にすでに画素が書き込まれていた場合
+					a = dst.at<Vec3b>(j, i);
+					b = src.at<Vec3b>(j, i);
+					dst.at<Vec3b>(j, i) = (a * pano_count.at<int>(j, i) + b)
+							/ (pano_count.at<int>(j, i) + 1.0);
+					//pano_count.at<int>(j, i)++;
 				}
-				pano_count.at<float>(j, i)++;
+				if (mask.at<unsigned char>(j, i) == 0)
+					if (roi.at<unsigned char>(j, i) == 255) {
+						// 書き込みたい画素位置にまだ書き込まれていない場合
+						mask.at<unsigned char>(j, i) = roi.at<unsigned char>(j,
+								i);
+						//pano_count.at<int>(j, i)++;
+						dst.at<Vec3b>(j, i) = src.at<Vec3b>(j, i);
+					}
 			}
 		}
 	}
 }
 
-	/* より良い対応点を選択する
-	 *
-	 * @Param descriptors1 特徴量１
-	 * @Param descriptors2 特徴量２
-	 * @Param key1         特徴点１
-	 * @Param key2         特徴点２
-	 * @Param matches      良いマッチングの格納先
-	 * @Param pt1          良いマッチングの特徴点座標１
-	 * @Param pt2          良いマッチングの特徴点座標２
-	 */
+/* より良い対応点を選択する
+ *
+ * @Param descriptors1 特徴量１
+ * @Param descriptors2 特徴量２
+ * @Param key1         特徴点１
+ * @Param key2         特徴点２
+ * @Param matches      良いマッチングの格納先
+ * @Param pt1          良いマッチングの特徴点座標１
+ * @Param pt2          良いマッチングの特徴点座標２
+ */
 void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
 		vector<KeyPoint> *key2, std::vector<cv::DMatch> *matches,
 		vector<Point2f> *pt1, vector<Point2f> *pt2) {
 
+	int MATCH_TYPE = KNN2_DIST;
+	float knn2_conf = 0.3f;
 	FlannBasedMatcher matcher;
 	//BFMatcher matcher(cv::NORM_L2, true);
 	vector<std::vector<cv::DMatch> > matches12, matches21;
 	std::vector<cv::DMatch> tmp_matches;
-	int knn = 1;
+	int knn = 2;
 	//BFMatcher matcher(cv::NORM_HAMMING, true);
 	//matcher.match(descriptors1, descriptors2, tmp_matches);
 
@@ -349,57 +361,92 @@ void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
 	matcher.knnMatch(descriptors1, descriptors2, matches12, knn);
 	matcher.knnMatch(descriptors2, descriptors1, matches21, knn);
 	tmp_matches.clear();
-	// KNN探索で，1->2と2->1が一致するものだけがマッチしたとみなされる
-	for (size_t m = 0; m < matches12.size(); m++) {
-		bool findCrossCheck = false;
-		for (size_t fk = 0; fk < matches12[m].size(); fk++) {
-			cv::DMatch forward = matches12[m][fk];
-			for (size_t bk = 0; bk < matches21[forward.trainIdx].size(); bk++) {
-				cv::DMatch backward = matches21[forward.trainIdx][bk];
-				if (backward.trainIdx == forward.queryIdx) {
-					tmp_matches.push_back(forward);
-					findCrossCheck = true;
+	if (MATCH_TYPE == CROSS) {
+		// KNN探索で，1->2と2->1が一致するものだけがマッチしたとみなされる
+		for (size_t m = 0; m < matches12.size(); m++) {
+			bool findCrossCheck = false;
+			for (size_t fk = 0; fk < matches12[m].size(); fk++) {
+				cv::DMatch forward = matches12[m][fk];
+				for (size_t bk = 0; bk < matches21[forward.trainIdx].size();
+						bk++) {
+					cv::DMatch backward = matches21[forward.trainIdx][bk];
+					if (backward.trainIdx == forward.queryIdx) {
+						tmp_matches.push_back(forward);
+						findCrossCheck = true;
+						break;
+					}
+				}
+				if (findCrossCheck)
 					break;
+			}
+		}
+
+		cout << "matches : " << tmp_matches.size() << endl;
+		double min_dist = DBL_MAX;
+		for (int i = 0; i < (int) tmp_matches.size(); i++) {
+			double dist = tmp_matches[i].distance;
+			if (dist < min_dist)
+				min_dist = dist;
+		}
+
+		cout << "min dist :" << min_dist << endl;
+
+		//  対応点間の移動距離による良いマッチングの取捨選択
+		matches->clear();
+		pt1->clear();
+		pt2->clear();
+		for (int i = 0; i < (int) tmp_matches.size(); i++) {
+			if (round((*key1)[tmp_matches[i].queryIdx].class_id)
+					== round((*key2)[tmp_matches[i].trainIdx].class_id)) {
+				if (tmp_matches[i].distance > 0
+						&& tmp_matches[i].distance < (min_dist + 0.1) * 50) {
+					//		  &&	(fabs(objectKeypoints[matches[i].queryIdx].pt.y - imageKeypoints[matches[i].trainIdx].pt.y)
+					//		/ fabs(objectKeypoints[matches[i].queryIdx].pt.x - 	imageKeypoints[matches[i].trainIdx].pt.x)) < 0.1) {
+					//				cout << "i : " << i << endl;
+					matches->push_back(tmp_matches[i]);
+					pt1->push_back((*key1)[tmp_matches[i].queryIdx].pt);
+					pt2->push_back((*key2)[tmp_matches[i].trainIdx].pt);
+					//good_objectKeypoints.push_back(
+					//		objectKeypoints[tmp_matches[i].queryIdx]);
+					//good_imageKeypoints.push_back(
+					//		imageKeypoints[tmp_matches[i].trainIdx]);
 				}
 			}
-			if (findCrossCheck)
-				break;
 		}
-	}
+	} else if (MATCH_TYPE == KNN2_DIST) {
+		// opencvのdetailクラスのmatcherを参考にした
+		set<pair<int, int> > match_set;
+		matches->clear();
+		pt1->clear();
+		pt2->clear();
+		for (auto i : matches12) {
+			if (i.size() < 2)
+				continue;
 
-	cout << "matches : " << tmp_matches.size() << endl;
-	double min_dist = DBL_MAX;
-	for (int i = 0; i < (int) tmp_matches.size(); i++) {
-		double dist = tmp_matches[i].distance;
-		if (dist < min_dist)
-			min_dist = dist;
-	}
+			const DMatch& m1 = i[0];
+			const DMatch& m2 = i[1];
+			if (m1.distance < (1.f - knn2_conf) * m2.distance) {
+				matches->push_back(m1);
+				match_set.insert(make_pair(m1.queryIdx, m1.trainIdx));
+				pt1->push_back((*key1)[m1.queryIdx].pt);
+				pt2->push_back((*key2)[m1.trainIdx].pt);
+			}
+		}
+		for (auto i : matches21) {
+			if (i.size() < 2)
+				continue;
 
-	cout << "min dist :" << min_dist << endl;
-
-	//  対応点間の移動距離による良いマッチングの取捨選択
-	matches->clear();
-	pt1->clear();
-	pt2->clear();
-	for (int i = 0; i < (int) tmp_matches.size(); i++) {
-		if (round((*key1)[tmp_matches[i].queryIdx].class_id)
-				== round((*key2)[tmp_matches[i].trainIdx].class_id)) {
-			if (tmp_matches[i].distance > 0
-					&& tmp_matches[i].distance < (min_dist + 0.1) * 20) {
-				//		  &&	(fabs(objectKeypoints[matches[i].queryIdx].pt.y - imageKeypoints[matches[i].trainIdx].pt.y)
-				//		/ fabs(objectKeypoints[matches[i].queryIdx].pt.x - 	imageKeypoints[matches[i].trainIdx].pt.x)) < 0.1) {
-				//				cout << "i : " << i << endl;
-				matches->push_back(tmp_matches[i]);
-				pt1->push_back((*key1)[tmp_matches[i].queryIdx].pt);
-				pt2->push_back((*key2)[tmp_matches[i].trainIdx].pt);
-				//good_objectKeypoints.push_back(
-				//		objectKeypoints[tmp_matches[i].queryIdx]);
-				//good_imageKeypoints.push_back(
-				//		imageKeypoints[tmp_matches[i].trainIdx]);
+			const DMatch& m1 = i[0];
+			const DMatch& m2 = i[1];
+			if (m1.distance < (1.f - knn2_conf) * m2.distance) {
+				if (match_set.find(make_pair(m1.trainIdx, m1.queryIdx))	== match_set.end()) {
+					matches->push_back(DMatch(m1.trainIdx, m1.queryIdx, m1.distance));
+					pt1->push_back((*key1)[m1.trainIdx].pt);
+					pt2->push_back((*key2)[m1.queryIdx].pt);
+				}
 			}
 		}
 	}
-
 }
 
 void get_color_hist(Mat image, vector<Mat> &hist_channels) {
