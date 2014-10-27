@@ -163,7 +163,6 @@ int main(int argc, char** argv) {
 
 	Mat a_tmp;
 	Mat dist;
-
 	list<pair<int, SENSOR_DATA> > near_senser_list; // はめ込み対象に視線方向が近いフレーム番号とそのセンサ情報を格納する
 
 	try {
@@ -486,7 +485,7 @@ int main(int argc, char** argv) {
 	}
 
 	Mat A1Matrix, A2Matrix;         // A1 : target_param (パノラマの元画像)
-										// A2 : object_param (はめ込む対象フレーム)
+									// A2 : object_param (はめ込む対象フレーム)
 	Mat yaw = Mat::eye(3, 3, CV_64FC1);
 	Mat roll = cv::Mat::eye(3, 3, CV_64FC1);
 	Mat pitch = cv::Mat::eye(3, 3, CV_64FC1);
@@ -612,7 +611,8 @@ int main(int argc, char** argv) {
 	 akaze.Compute_Descriptors(objectKeypoints,objectDescriptors);
 	 }
 	 */
-	feature->operator ()(gray_img1, Mat(), objectKeypoints, objectDescriptors,false);
+	feature->operator ()(gray_img1, Mat(), objectKeypoints, objectDescriptors,
+			false);
 
 	//feature->operator ()(gray_img2, mask2, imageKeypoints, imageDescriptors);
 	//良い対応点の組みを求める
@@ -771,9 +771,8 @@ int main(int argc, char** argv) {
 		// 該当フレーム番号のフレーム画像を取得(先頭に戻ってから当該フレームを取得)
 		// cap.get()でシークするとdupフレームが考慮されなくなる?
 		pano_cap.set(CV_CAP_PROP_POS_FRAMES, 0);
-		for (int i = 0; i < (*it).first-1; i++)
+		for (int i = 0; i < (*it).first - 1; i++)
 			pano_cap.grab();
-
 		pano_cap >> current_near;
 
 		// 近い背景フレーム画像を書き出し
@@ -784,7 +783,8 @@ int main(int argc, char** argv) {
 
 		cvtColor(current_near, gray_img2, CV_RGB2GRAY);
 		//g_feature_detector.detect(gray_img2,current_keypoints);
-		feature->operator ()(gray_img2, Mat(), current_keypoints,current_discriptor,false);
+		feature->operator ()(gray_img2, Mat(), current_keypoints,
+				current_discriptor, false);
 		/*
 		 {
 		 Mat img32;
@@ -794,12 +794,12 @@ int main(int argc, char** argv) {
 		 akaze.Compute_Descriptors(current_keypoints,current_discriptor);
 		 }
 		 */
-			good_matcher(objectDescriptors, current_discriptor, &objectKeypoints,
-					&current_keypoints, &matches, &pt1, &pt2);
-/*
+		good_matcher(objectDescriptors, current_discriptor, &objectKeypoints,
+				&current_keypoints, &matches, &pt1, &pt2);
+
 		//using detail::BestOf2NearestMatcher by Opencv (優秀)
 		vector<detail::ImageFeatures> features(2);
-
+		features.clear();
 		detail::ImageFeatures aa;
 		aa.descriptors = current_discriptor.clone();
 		aa.img_idx = 0;
@@ -816,7 +816,7 @@ int main(int argc, char** argv) {
 		detail::BestOf2NearestMatcher matcher(false, 0.3f);
 		matcher(features, pairwise_matches);
 		matcher.collectGarbage();
-*/
+
 		/*
 		 // BestOf2NearestMatcherでの結果を一部のみ表示してみる
 		 vector<DMatch> submatch;
@@ -835,61 +835,92 @@ int main(int argc, char** argv) {
 		// detail::HomographyBasedEstimatorと
 		// detail::BundleAdjusterReprojを使った
 		// 回転行列の推定（求めることはできたが合っているかの検証はまだ）
-		/*
-		 detail::HomographyBasedEstimator estimator;
-		 vector<detail::CameraParams> cameras;
-		 estimator(features, pairwise_matches, cameras);
 
+		detail::HomographyBasedEstimator estimator;
+		vector<detail::CameraParams> cameras;
+		estimator(features, pairwise_matches, cameras);
 
-		 for (auto var = cameras.begin(); var < cameras.end(); var++) {
-		 // BundleBundleAdjusterはCV_32Fを要求しているので変換
-		 Mat R;
-		 (*var).R.convertTo(R, CV_32F);
-		 (*var).R = R.clone();
-		 //cout << "test : " << (*var).R << endl;
-		 }
-
-		 Ptr<detail::BundleAdjusterBase> adjuster;
-		 adjuster = new detail::BundleAdjusterReproj();
-		 adjuster->setConfThresh(1.f);
-		 Mat_<uchar> refine_mask = Mat::zeros(3, 3, CV_8U);
-		 refine_mask(0, 0) = 1;
-		 refine_mask(0, 1) = 1;
-		 refine_mask(0, 2) = 1;
-		 refine_mask(1, 1) = 1;
-		 refine_mask(1, 2) = 1;
-		 adjuster->setRefinementMask(refine_mask);
-		 (*adjuster)(features, pairwise_matches, cameras);
-		 */
-		/*
-		 // これは不要のはず
-		 for (auto var : cameras) {
-		 Mat R;
-		 var.R.convertTo(R, CV_32F);
-		 var.R = R;
-		 cout << "test : " << var.R << endl;
-		 }
-		 */
-		//features.clear();
-/*
-		// detail::BestOf2NearestMatcherでのマッチング結果を
-		// 使ってホモグラフィ行列を計算してみるために，対応点の座標を取り出す
-		// 14というindexはどうにか計算できるみたいだが今は勘
-		vector<Point2f> p1, p2;
-		p1.clear();
-		p2.clear();
-		for (auto a : pairwise_matches[14].matches) {
-			p1.push_back(objectKeypoints[a.queryIdx].pt);
-			p2.push_back(current_keypoints[a.trainIdx].pt);
-
+		for (auto var = cameras.begin(); var < cameras.end(); var++) {
+			// BundleBundleAdjusterはCV_32Fを要求しているので変換
+			Mat R;
+			(*var).R.convertTo(R, CV_32F);
+			(*var).R = R.clone();
+			// cout << "test : " << (*var).R << endl;
 		}
 
-		calced_homography = findHomography(Mat(p1), Mat(p2), state, CV_RANSAC,1.5);
+		Ptr<detail::BundleAdjusterBase> adjuster;
+		adjuster = new detail::BundleAdjusterReproj();
+		adjuster->setConfThresh(1.f);
+		Mat_<uchar> refine_mask = Mat::zeros(3, 3, CV_8U);
+		refine_mask(0, 0) = 1;
+		refine_mask(0, 1) = 1;
+		refine_mask(0, 2) = 1;
+		refine_mask(1, 1) = 1;
+		refine_mask(1, 2) = 1;
+		adjuster->setRefinementMask(refine_mask);
+
+		cameras[0].focal = A1Matrix.at<double>(0, 0);
+		cameras[0].aspect = A1Matrix.at<double>(1, 1) / cameras[0].focal;
+		cameras[0].ppx = A1Matrix.at<double>(0, 2);
+		cameras[0].ppy = A1Matrix.at<double>(1, 2);
+		cout << cameras[0].K() << endl;
+
+		cameras[1].focal = A2Matrix.at<double>(0, 0);
+		cameras[1].aspect = A2Matrix.at<double>(1, 1) / cameras[1].focal;
+		cameras[1].ppx = A2Matrix.at<double>(0, 2);
+		cameras[1].ppy = A2Matrix.at<double>(1, 2);
+		cout << cameras[1].K() << endl;
+		(*adjuster)(features, pairwise_matches, cameras);
+
+		// これは不要のはず
+		for (auto var : cameras) {
+			Mat R;
+			var.R.convertTo(R, CV_64F);
+			var.R = R.clone();
+			// cout << "test : " << var.R << endl;
+		}
+
+		//features.clear();
+		/*
+		 // detail::BestOf2NearestMatcherでのマッチング結果を
+		 // 使ってホモグラフィ行列を計算してみるために，対応点の座標を取り出す
+		 // 14というindexはどうにか計算できるみたいだが今は勘
+		 vector<Point2f> p1, p2;
+		 p1.clear();
+		 p2.clear();
+		 for (auto a : pairwise_matches[14].matches) {
+		 p1.push_back(objectKeypoints[a.queryIdx].pt);
+		 p2.push_back(current_keypoints[a.trainIdx].pt);
+
+		 }
+
+		 calced_homography = findHomography(Mat(p1), Mat(p2), state, CV_RANSAC,1.5);
+		 cout << calced_homography << endl;
+		 */
+		calced_homography = findHomography(Mat(pt1), Mat(pt2), state,
+				CV_RANSAC);
+
+		cout << "findhomography : " << endl;
 		cout << calced_homography << endl;
-*/
-		calced_homography = findHomography(Mat(pt1), Mat(pt2),state, CV_RANSAC);
+		{
+			Mat R, K, R0, K0;
+			cameras[1].R.convertTo(R, CV_64F);
+			cameras[0].R.convertTo(R0, CV_64F);
+			Mat(cameras[1].K()).convertTo(K, CV_64F);
+			Mat(cameras[0].K()).convertTo(K0, CV_64F);
+			//cout << R.t() * K_inv << endl;;
+			cout << A1Matrix.type() << R.type() << A2Matrix.inv().type()
+					<< endl;
+			calced_homography = K0 * R0.inv() * R * K.inv();
+
+		}
+		cout << "cameras K :" << endl;
+		cout << cameras[1].K() << endl;
+		cout << cameras[0].K() << endl;
+
+		cout << "rotationbased homography : " << endl;
 		cout << calced_homography << endl;
-/*
+		/*
 		 //using stitcher by opencv
 		 // これを使うと何も考えずに2枚の画像を貼り合わせられる
 		 // ただ，視線方向やパノラマのサイズ，blendの設定等があまりいじれないため
@@ -910,7 +941,7 @@ int main(int argc, char** argv) {
 		 imshow("stitch test", pano);
 		 waitKey(0);
 
-*/
+		 */
 
 		// マッチングの結果を画像で保存
 		current_adopt.clear();
@@ -921,8 +952,7 @@ int main(int argc, char** argv) {
 
 		drawMatches(target_frame, objectKeypoints, current_near,
 				current_keypoints, current_adopt, result, Scalar::all(-1),
-				Scalar::all(-1), vector<char>());
-
+				Scalar::all(-1), vector<char>(), 2);
 
 		ss << "#" << idx << " adopted size :" << current_adopt.size();
 		putText(result, ss.str(), cv::Point(50, 50), FONT_HERSHEY_SIMPLEX, 1.2,
@@ -930,7 +960,7 @@ int main(int argc, char** argv) {
 		ss.clear();
 		ss.str("");
 
-		ss << save_path << "adopt_matches_" << setw(4) << (*it).first << ".jpg";
+		ss << save_path << "adopt_matches_" << setw(4) << (*it).first << ".png";
 		imwrite(ss.str(), result);
 		ss.clear();
 		ss.str("");
