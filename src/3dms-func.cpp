@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include<opencv2/opencv.hpp>
+#include <opencv2/stitching/stitcher.hpp>
 #include "3dms-func.h"
 #include<iostream>
 using namespace cv;
@@ -151,11 +152,10 @@ int SetPanRotationMatrix(Mat *panMatrix, double pan_deg) {
 	//	cvmSet(panMatrix, 0, 0, cos(pan_angle));
 	return 0;
 }
-
 // Roll :
 int SetRollRotationMatrix(Mat *rollMatrix, double roll_deg) {
 	double roll_angle;
-
+	(*rollMatrix) = Mat::eye(3, 3, CV_64FC1);
 	roll_angle = roll_deg / 180.0 * M_PI;
 	(*rollMatrix).at<double>(0, 0) = cos(roll_angle);
 	(*rollMatrix).at<double>(0, 1) = -sin(roll_angle);
@@ -171,7 +171,7 @@ int SetRollRotationMatrix(Mat *rollMatrix, double roll_deg) {
 // Pitch :
 int SetPitchRotationMatrix(Mat *pitchMatrix, double pitch_deg) {
 	double pitch_angle;
-
+	(*pitchMatrix) = Mat::eye(3, 3, CV_64FC1);
 	pitch_angle = pitch_deg / 180.0 * M_PI;
 	(*pitchMatrix).at<double>(1, 1) = cos(pitch_angle);
 	(*pitchMatrix).at<double>(1, 2) = -sin(pitch_angle);
@@ -187,7 +187,7 @@ int SetPitchRotationMatrix(Mat *pitchMatrix, double pitch_deg) {
 // Yaw
 int SetYawRotationMatrix(Mat *yawMatrix, double yaw_deg) {
 	double yaw_angle;
-
+	(*yawMatrix) = Mat::eye(3, 3, CV_64FC1);
 	yaw_angle = yaw_deg / 180.0 * M_PI;
 	(*yawMatrix).at<double>(2, 2) = cos(yaw_angle);
 	(*yawMatrix).at<double>(2, 0) = -sin(yaw_angle);
@@ -199,7 +199,6 @@ int SetYawRotationMatrix(Mat *yawMatrix, double yaw_deg) {
 	//	cvmSet(yawMatrix, 0, 0, cos(yaw_angle));
 	return 0;
 }
-
 void setHomographyReset(Mat* homography) {
 	cvZero(homography);
 	(*homography).at<double>(0, 0) = 1;
@@ -307,23 +306,22 @@ void make_pano(Mat src, Mat dst, Mat mask, Mat roi) {
 		int w = src.cols;
 		for (int i = 0; i < w; i++) {
 			for (int j = 0; j < h; j++) {
-				if (mask.at<unsigned char>(j, i) == 255
-						&& roi.at<unsigned char>(j, i) == 255) {
-					// 書き込みたい画素位置にすでに画素が書き込まれていた場合
-					a = dst.at<Vec3b>(j, i);
-					b = src.at<Vec3b>(j, i);
-					dst.at<Vec3b>(j, i) = (a * pano_count.at<int>(j, i) + b)
-							/ (pano_count.at<int>(j, i) + 1.0);
+				//if (mask.at<unsigned char>(j, i) == 255
+				//		&& roi.at<unsigned char>(j, i) == 255) {
+				// 書き込みたい画素位置にすでに画素が書き込まれていた場合
+				//	a = dst.at<Vec3b>(j, i);
+				//	b = src.at<Vec3b>(j, i);
+				//	dst.at<Vec3b>(j, i) = (a * pano_count.at<int>(j, i) + b)
+				//			/ (pano_count.at<int>(j, i) + 1.0);
+				//pano_count.at<int>(j, i)++;
+				//}
+				//if (mask.at<unsigned char>(j, i) == 0)
+				if (roi.at<unsigned char>(j, i) == 255) {
+					// 書き込みたい画素位置にまだ書き込まれていない場合
+					mask.at<unsigned char>(j, i) = roi.at<unsigned char>(j, i);
 					//pano_count.at<int>(j, i)++;
+					dst.at<Vec3b>(j, i) = src.at<Vec3b>(j, i);
 				}
-				if (mask.at<unsigned char>(j, i) == 0)
-					if (roi.at<unsigned char>(j, i) == 255) {
-						// 書き込みたい画素位置にまだ書き込まれていない場合
-						mask.at<unsigned char>(j, i) = roi.at<unsigned char>(j,
-								i);
-						//pano_count.at<int>(j, i)++;
-						dst.at<Vec3b>(j, i) = src.at<Vec3b>(j, i);
-					}
 			}
 		}
 	}
@@ -439,8 +437,10 @@ void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
 			const DMatch& m1 = i[0];
 			const DMatch& m2 = i[1];
 			if (m1.distance < (1.f - knn2_conf) * m2.distance) {
-				if (match_set.find(make_pair(m1.trainIdx, m1.queryIdx))	== match_set.end()) {
-					matches->push_back(DMatch(m1.trainIdx, m1.queryIdx, m1.distance));
+				if (match_set.find(make_pair(m1.trainIdx, m1.queryIdx))
+						== match_set.end()) {
+					matches->push_back(
+							DMatch(m1.trainIdx, m1.queryIdx, m1.distance));
 					pt1->push_back((*key1)[m1.trainIdx].pt);
 					pt2->push_back((*key2)[m1.queryIdx].pt);
 				}
@@ -509,3 +509,104 @@ void get_gray_hist(Mat image, Mat &hist_channel) {
 	//imshow("hist",histImage);
 	//waitKey();
 }
+
+Mat rotation_estimater(Mat A1, Mat A2, vector<detail::ImageFeatures> features,
+		Mat outA1, Mat outA2) {
+	Mat homography;
+
+	vector<detail::MatchesInfo> pairwise_matches;
+
+	// MatchesInfo を生成するためにopencvのmatcherを使用
+	detail::BestOf2NearestMatcher matcher(false, 0.3f);
+	matcher(features, pairwise_matches);
+	matcher.collectGarbage();
+
+	// detail::HomographyBasedEstimatorと
+	// detail::BundleAdjusterReprojを使った
+	// 回転行列の推定（求めることはできたが合っているかの検証はまだ）
+	detail::HomographyBasedEstimator estimator;
+	vector<detail::CameraParams> cameras;
+	estimator(features, pairwise_matches, cameras);
+	//cout << pairwise_matches[2].H << endl;
+
+	for (auto var = cameras.begin(); var < cameras.end(); var++) {
+		// BundleBundleAdjusterはCV_32Fを要求しているので変換
+		Mat R;
+		(*var).R.convertTo(R, CV_32F);
+		(*var).R = R.clone();
+		cout << "test : " << (*var).R << endl;
+	}
+
+	Ptr<detail::BundleAdjusterBase> adjuster;
+	adjuster = new detail::BundleAdjusterReproj();
+	adjuster->setConfThresh(1.0f);
+	Mat_<uchar> refine_mask = Mat::zeros(3, 3, CV_8U);
+	refine_mask(0, 0) = 1; //focal
+	refine_mask(0, 1) = 1; // useless
+	refine_mask(0, 2) = 0; // ppx
+	refine_mask(1, 1) = 1; // aspect
+	refine_mask(1, 2) = 0; // ppy
+	adjuster->setRefinementMask(refine_mask);
+
+	cameras[0].focal = A1.at<double>(0, 0);
+	cameras[0].aspect = A1.at<double>(1, 1) / cameras[0].focal;
+	cameras[0].ppx = A1.at<double>(0, 2);
+	cameras[0].ppy = A1.at<double>(1, 2);
+	//cout << cameras[0].K() << endl;
+
+	cameras[1].focal = A2.at<double>(0, 0);
+	cameras[1].aspect = A2.at<double>(1, 1) / cameras[1].focal;
+	cameras[1].ppx = A2.at<double>(0, 2);
+	cameras[1].ppy = A2.at<double>(1, 2);
+	//cout << cameras[1].K() << endl;
+	(*adjuster)(features, pairwise_matches, cameras);
+
+	// これは不要のはず
+	for (auto var : cameras) {
+		Mat R;
+		var.R.convertTo(R, CV_64F);
+		var.R = R.clone();
+		// cout << "test : " << var.R << endl;
+	}
+
+	{
+		Mat R, K, R0, K0;
+		cameras[1].R.convertTo(R, CV_64F);
+		cameras[0].R.convertTo(R0, CV_64F);
+		Mat(cameras[1].K()).convertTo(K, CV_64F);
+		Mat(cameras[0].K()).convertTo(K0, CV_64F);
+		homography = K0 * R0.inv() * R * K.inv();
+		outA1 = K;
+		outA2 = K0;
+		//cout << cameras[0].K() << endl;
+		//	cout << cameras[1].K() << endl;
+	}
+
+	return homography;
+}
+
+// パノラマ背景の元フレーム画像の情報(構造体)
+typedef struct {
+	Mat frame = Mat(Size(PANO_W, PANO_H), CV_8UC3);	// フレーム画像
+	Mat in_param = Mat(3, 3, CV_64F);					// 内部パラメータ
+	vector<KeyPoint> keypoints;						// 特徴点
+	Mat descriptor;									// 特徴量
+	SENSOR_DATA sd;									// センサによる視線方向
+	Mat homography = Mat(3, 3, CV_64F);				// パノラマ平面へのホモグラフィー
+} pano_frame;
+
+typedef struct {
+	Mat frame = Mat(Size(PANO_W, PANO_H), CV_8UC3);	// フレーム画像
+	Mat in_param = Mat(3, 3, CV_64F);					// 内部パラメータ
+	vector<KeyPoint> keypoints;						// 特徴点
+	Mat descriptor;									// 特徴量
+	SENSOR_DATA sd;									// センサによる視線方向
+	Mat homography = Mat(3, 3, CV_64F);				// パノラマ平面へのホモグラフィー
+} target_frame;
+
+// パノラマ画像構造体
+typedef struct {
+	Mat panorama = Mat(Size(PANO_W, PANO_H), CV_8UC3);	// パノラマ画像
+	Mat mask = Mat(Size(PANO_W, PANO_H), CV_8U);		// マスク
+
+} panorama;

@@ -107,7 +107,17 @@ void get_color_hist(Mat image,vector<Mat> &hist_channels);
 
 void get_gray_hist(Mat image,Mat &hist_channel);
 
-
+/* 特徴点のペアから回転行列と内部パラメータによる
+ * 射影変換行列を計算する関数
+ * 初期値としてA1とA2をとり，レーベンバーグマーカート法で
+ * 計算する．
+ * @Param A1       queryの内部パラメータ
+ * @Param A2       trainの内部パラメータ
+ * @Param features 特徴点と特徴量　size 2
+ * @Param outA1    推定されたA1
+ * @Param outA2    推定されたA2
+ */
+Mat rotation_estimater(Mat A1, Mat A2, vector<cv::detail::ImageFeatures> features, Mat outA1, Mat outA2);
 
 
 
