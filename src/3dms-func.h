@@ -117,7 +117,7 @@ void get_gray_hist(Mat image,Mat &hist_channel);
  * @Param outA1    推定されたA1
  * @Param outA2    推定されたA2
  */
-Mat rotation_estimater(Mat A1, Mat A2, vector<cv::detail::ImageFeatures> features, Mat outA1, Mat outA2);
+Mat rotation_estimater(Mat A1, Mat A2, vector<cv::detail::ImageFeatures> features, Mat &outA1, Mat &outA2, vector<DMatch> &adopted);
 
 
 

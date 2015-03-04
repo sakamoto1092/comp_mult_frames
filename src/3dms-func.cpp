@@ -241,7 +241,7 @@ void get_histimage(Mat image, Mat *hist_image) {
 	Rect roi_rect;
 	Mat count(10, 10, CV_32F, cv::Scalar(0)); // エッジの数を格納するカウンタ
 
-	cout << "making histgram" << endl;
+	//cout << "making histgram" << endl;
 	for (int i = 0; i < 10; i++) {
 		for (int j = 0; j < 10; j++) {
 			double max_value;
@@ -304,8 +304,10 @@ void make_pano(Mat src, Mat dst, Mat mask, Mat roi) {
 	if (src.cols == dst.cols && src.rows == dst.rows) {
 		int h = src.rows;
 		int w = src.cols;
-		for (int i = 0; i < w; i++) {
-			for (int j = 0; j < h; j++) {
+		int i,j;
+#pragma omp parallel for private(j)
+		for (i = 0; i < w; i++) {
+			for (j = 0; j < h; j++) {
 				//if (mask.at<unsigned char>(j, i) == 255
 				//		&& roi.at<unsigned char>(j, i) == 255) {
 				// 書き込みたい画素位置にすでに画素が書き込まれていた場合
@@ -348,6 +350,8 @@ void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
 	vector<std::vector<cv::DMatch> > matches12, matches21;
 	std::vector<cv::DMatch> tmp_matches;
 	int knn = 2;
+	TickMeter tmeter;
+	tmeter.start();
 	//BFMatcher matcher(cv::NORM_HAMMING, true);
 	//matcher.match(descriptors1, descriptors2, tmp_matches);
 
@@ -379,7 +383,7 @@ void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
 			}
 		}
 
-		cout << "matches : " << tmp_matches.size() << endl;
+		//cout << "matches : " << tmp_matches.size() << endl;
 		double min_dist = DBL_MAX;
 		for (int i = 0; i < (int) tmp_matches.size(); i++) {
 			double dist = tmp_matches[i].distance;
@@ -387,7 +391,7 @@ void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
 				min_dist = dist;
 		}
 
-		cout << "min dist :" << min_dist << endl;
+		//cout << "min dist :" << min_dist << endl;
 
 		//  対応点間の移動距離による良いマッチングの取捨選択
 		matches->clear();
@@ -447,6 +451,8 @@ void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
 			}
 		}
 	}
+	tmeter.stop();
+	cout << "proc time on goodmatcher"<<tmeter.getTimeMilli()<<endl;
 }
 
 void get_color_hist(Mat image, vector<Mat> &hist_channels) {
@@ -511,13 +517,13 @@ void get_gray_hist(Mat image, Mat &hist_channel) {
 }
 
 Mat rotation_estimater(Mat A1, Mat A2, vector<detail::ImageFeatures> features,
-		Mat outA1, Mat outA2) {
+		Mat &outA1, Mat &outA2, vector<DMatch>& adopted) {
 	Mat homography;
 
 	vector<detail::MatchesInfo> pairwise_matches;
 
 	// MatchesInfo を生成するためにopencvのmatcherを使用
-	detail::BestOf2NearestMatcher matcher(false, 0.3f);
+	detail::BestOf2NearestMatcher matcher(true, 0.3f);
 	matcher(features, pairwise_matches);
 	matcher.collectGarbage();
 
@@ -527,14 +533,13 @@ Mat rotation_estimater(Mat A1, Mat A2, vector<detail::ImageFeatures> features,
 	detail::HomographyBasedEstimator estimator;
 	vector<detail::CameraParams> cameras;
 	estimator(features, pairwise_matches, cameras);
-	//cout << pairwise_matches[2].H << endl;
 
 	for (auto var = cameras.begin(); var < cameras.end(); var++) {
 		// BundleBundleAdjusterはCV_32Fを要求しているので変換
 		Mat R;
 		(*var).R.convertTo(R, CV_32F);
 		(*var).R = R.clone();
-		cout << "test : " << (*var).R << endl;
+		//cout << "test : " << (*var).R << endl;
 	}
 
 	Ptr<detail::BundleAdjusterBase> adjuster;
@@ -542,9 +547,9 @@ Mat rotation_estimater(Mat A1, Mat A2, vector<detail::ImageFeatures> features,
 	adjuster->setConfThresh(1.0f);
 	Mat_<uchar> refine_mask = Mat::zeros(3, 3, CV_8U);
 	refine_mask(0, 0) = 1; //focal
-	refine_mask(0, 1) = 1; // useless
+	refine_mask(0, 1) = 0; // useless
 	refine_mask(0, 2) = 0; // ppx
-	refine_mask(1, 1) = 1; // aspect
+	refine_mask(1, 1) = 0; // aspect
 	refine_mask(1, 2) = 0; // ppy
 	adjuster->setRefinementMask(refine_mask);
 
@@ -566,6 +571,7 @@ Mat rotation_estimater(Mat A1, Mat A2, vector<detail::ImageFeatures> features,
 		Mat R;
 		var.R.convertTo(R, CV_64F);
 		var.R = R.clone();
+
 		// cout << "test : " << var.R << endl;
 	}
 
@@ -576,10 +582,14 @@ Mat rotation_estimater(Mat A1, Mat A2, vector<detail::ImageFeatures> features,
 		Mat(cameras[1].K()).convertTo(K, CV_64F);
 		Mat(cameras[0].K()).convertTo(K0, CV_64F);
 		homography = K0 * R0.inv() * R * K.inv();
-		outA1 = K;
-		outA2 = K0;
+		outA1 = K.clone();
+		outA2 = K0.clone();
+		for(int i =0; i < pairwise_matches[2].inliers_mask.size();i++){
+			if(pairwise_matches[2].inliers_mask[i] == 1)
+				adopted.push_back(pairwise_matches[2].matches[i]);
+		}
 		//cout << cameras[0].K() << endl;
-		//	cout << cameras[1].K() << endl;
+		//cout << cameras[1].K() << endl;
 	}
 
 	return homography;
