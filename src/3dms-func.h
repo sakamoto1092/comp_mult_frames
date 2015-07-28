@@ -4,41 +4,43 @@
 
 #define MAXDATA_3DMS  60000
 
+
+
 using namespace cv;
-typedef struct{
-    double alpha, beta, gamma, north;
-    //double Accx, Accy, Accz;
-    //int wAccx, wAccy, wAccz;
-    //int wGyrx, wGyry, wGyrz;
-    //int wMagx, wMagy, wMagz;
-    //double HH,MM,SS;
-    double TT;
-}SENSOR_DATA;
+typedef struct {
+	double alpha, beta, gamma, north;
+	//double Accx, Accy, Accz;
+	//int wAccx, wAccy, wAccz;
+	//int wGyrx, wGyry, wGyrz;
+	//int wMagx, wMagy, wMagz;
+	//double HH,MM,SS;
+	double TT;
+} SENSOR_DATA;
 
 // CROSS     : クロスマッチング（1->2 & 2->1）
 // KNN2_DIST : KNNでの2点で距離が離れているものを採用
-enum{CROSS, KNN2_DIST};
+enum {
+	CROSS, KNN2_DIST
+};
 
 // ���ĤΥ��󥵥ǡ�����ɽ�������ߤϻ���Ȧ�, ��, ��, ��-north ��ɽ��
 int DispSensorData(SENSOR_DATA sd);
 
 // ���󥵥ǡ����ե����뤫����ɤ߹���
-int LoadSensorData(const char *oridatafile ,SENSOR_DATA *sd_array[]);
+int LoadSensorData(const char *oridatafile, SENSOR_DATA *sd_array[]);
 //int LoadSensorData(char *timedatafile,char *accdatafile,char *magdatafile,char *oridatafile , SENSOR_DATA *sd_array[]);
 
 // ���󥵥ǡ�������֤��ƻ���Υѥ�᡼���򻻽Ф���
-int GetSensorDataForTime(double TT, SENSOR_DATA *in_sd_array[], SENSOR_DATA *sd);
+int GetSensorDataForTime(double TT, SENSOR_DATA *in_sd_array[],
+		SENSOR_DATA *sd);
 
 // Tilt :
 int SetTiltRotationMatrix(Mat *tiltMatrix, double tilt_deg);
 
-
 int SetPanRotationMatrix(Mat *panMatrix, double pan_deg);
-
 
 // Roll :
 int SetRollRotationMatrix(Mat *rollMatrix, double roll_deg);
-
 
 // Pitch :
 int SetPitchRotationMatrix(Mat *pitchMatrix, double pitch_deg);
@@ -50,7 +52,6 @@ void setHomographyReset(Mat* homography);
 
 double compareSURFDescriptors(const float* d1, const float* d2, double best,
 		int length);
-
 
 /*
  * 画像を縦横１０分割し，それぞれの部分画像の
@@ -65,8 +66,6 @@ double compareSURFDescriptors(const float* d1, const float* d2, double best,
  *
  */
 void get_histimage(Mat image, Mat *hist_image);
-
-
 
 /*
  *  透視投影変換後の画像をパノラマ平面にマスクを用いて
@@ -91,9 +90,10 @@ void make_pano(Mat src, Mat dst, Mat mask, Mat roi);
  * @Param pt1          良いマッチングの特徴点座標1の格納先
  * @Param pt2          良いマッチングの特徴点座標2の格納先
  */
-void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
-		vector<KeyPoint> *key2, std::vector<cv::DMatch> *matches, vector<
-				Point2f> *pt1, vector<Point2f> *pt2);
+void good_matcher(Mat descriptors1, Mat descriptors2,
+		std::vector<KeyPoint> *key1, std::vector<KeyPoint> *key2,
+		std::vector<cv::DMatch> *matches, std::vector<Point2f> *pt1,
+		std::vector<Point2f> *pt2);
 
 /*
  * 入力画像を各チャネルに分離して
@@ -103,9 +103,9 @@ void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
  * @Param channels チャネルごとのヒストグラムの格納先
  *
  */
-void get_color_hist(Mat image,vector<Mat> &hist_channels);
+void get_color_hist(Mat image, std::vector<Mat> &hist_channels);
 
-void get_gray_hist(Mat image,Mat &hist_channel);
+void get_gray_hist(Mat image, Mat &hist_channel);
 
 /* 特徴点のペアから回転行列と内部パラメータによる
  * 射影変換行列を計算する関数
@@ -117,7 +117,7 @@ void get_gray_hist(Mat image,Mat &hist_channel);
  * @Param outA1    推定されたA1
  * @Param outA2    推定されたA2
  */
-Mat rotation_estimater(Mat A1, Mat A2, vector<cv::detail::ImageFeatures> features, Mat &outA1, Mat &outA2, vector<DMatch> &adopted);
-
-
+Mat rotation_estimater(Mat A1, Mat A2,
+		std::vector<cv::detail::ImageFeatures> features, Mat &outA1, Mat &outA2,
+		std::vector<DMatch> &adopted);
 

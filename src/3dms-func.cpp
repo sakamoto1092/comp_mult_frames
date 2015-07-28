@@ -5,15 +5,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include<opencv2/opencv.hpp>
-#include <opencv2/stitching/stitcher.hpp>
+#include <opencv2/stitching.hpp>
 #include "3dms-func.h"
 #include<iostream>
 using namespace cv;
 using namespace std;
 #define PANO_W 6000
 #define PANO_H 3000
+
+
+
 cv::Mat pano_count = Mat(Size(PANO_W, PANO_H), CV_32S, Scalar::all(0));
 // ���ĤΥ��󥵥ǡ�����ɽ�������ߤϻ���Ȧ�, ��, ��, ��-north ��ɽ��
+
 int DispSensorData(SENSOR_DATA sd) {
 	fprintf(stderr, "%f %f %f %f ", sd.alpha, sd.beta, sd.gamma, sd.north);
 	fprintf(stderr, "%f\n", sd.TT);
@@ -304,7 +308,7 @@ void make_pano(Mat src, Mat dst, Mat mask, Mat roi) {
 	if (src.cols == dst.cols && src.rows == dst.rows) {
 		int h = src.rows;
 		int w = src.cols;
-		int i,j;
+		int i, j;
 #pragma omp parallel for private(j)
 		for (i = 0; i < w; i++) {
 			for (j = 0; j < h; j++) {
@@ -350,19 +354,21 @@ void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
 	vector<std::vector<cv::DMatch> > matches12, matches21;
 	std::vector<cv::DMatch> tmp_matches;
 	int knn = 2;
-	TickMeter tmeter;
-	tmeter.start();
+	getTickCount();
+	//TickMeter tmeter;
+	//tmeter.start();
 	//BFMatcher matcher(cv::NORM_HAMMING, true);
 	//matcher.match(descriptors1, descriptors2, tmp_matches);
 
 	cout << key1->size() << endl;
 	cout << key2->size() << endl;
-	//cout << descriptors1.size() << endl;
-	//cout << descriptors2.size() << endl;
+	cout << descriptors1.size() << endl;
+	cout << descriptors2.size() << endl;
 
 	matcher.knnMatch(descriptors1, descriptors2, matches12, knn);
 	matcher.knnMatch(descriptors2, descriptors1, matches21, knn);
 	tmp_matches.clear();
+
 	if (MATCH_TYPE == CROSS) {
 		// KNN探索で，1->2と2->1が一致するものだけがマッチしたとみなされる
 		for (size_t m = 0; m < matches12.size(); m++) {
@@ -421,6 +427,7 @@ void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
 		matches->clear();
 		pt1->clear();
 		pt2->clear();
+
 		for (auto i : matches12) {
 			if (i.size() < 2)
 				continue;
@@ -451,8 +458,8 @@ void good_matcher(Mat descriptors1, Mat descriptors2, vector<KeyPoint> *key1,
 			}
 		}
 	}
-	tmeter.stop();
-	cout << "proc time on goodmatcher"<<tmeter.getTimeMilli()<<endl;
+	//tmeter.stop();
+	//cout << "proc time on goodmatcher" << tmeter.getTimeMilli() << endl;
 }
 
 void get_color_hist(Mat image, vector<Mat> &hist_channels) {
@@ -520,12 +527,15 @@ Mat rotation_estimater(Mat A1, Mat A2, vector<detail::ImageFeatures> features,
 		Mat &outA1, Mat &outA2, vector<DMatch>& adopted) {
 	Mat homography;
 
-	vector<detail::MatchesInfo> pairwise_matches;
+	vector<detail::MatchesInfo> pairwise_matches(4);
 
 	// MatchesInfo を生成するためにopencvのmatcherを使用
 	detail::BestOf2NearestMatcher matcher(true, 0.3f);
+
 	matcher(features, pairwise_matches);
 	matcher.collectGarbage();
+
+	//cout << "sizeof matchesinfo : " << pairwise_matches.size()<< endl;
 
 	// detail::HomographyBasedEstimatorと
 	// detail::BundleAdjusterReprojを使った
@@ -584,8 +594,8 @@ Mat rotation_estimater(Mat A1, Mat A2, vector<detail::ImageFeatures> features,
 		homography = K0 * R0.inv() * R * K.inv();
 		outA1 = K.clone();
 		outA2 = K0.clone();
-		for(int i =0; i < pairwise_matches[2].inliers_mask.size();i++){
-			if(pairwise_matches[2].inliers_mask[i] == 1)
+		for (int i = 0; i < pairwise_matches[2].inliers_mask.size(); i++) {
+			if (pairwise_matches[2].inliers_mask[i] == 1)
 				adopted.push_back(pairwise_matches[2].matches[i]);
 		}
 		//cout << cameras[0].K() << endl;
@@ -620,3 +630,4 @@ typedef struct {
 	Mat mask = Mat(Size(PANO_W, PANO_H), CV_8U);		// マスク
 
 } panorama;
+
